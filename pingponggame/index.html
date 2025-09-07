@@ -10,7 +10,7 @@
     --accent:#22d3ee; --brick:#94a3b8; --ball:#fbbf24;
   }
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;overflow:hidden}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
   header{
     padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);background:var(--panel);
     display:flex;align-items:center;justify-content:space-between;gap:12px
@@ -18,20 +18,11 @@
   h1{margin:0;font-size:18px;white-space:nowrap}
   .score{font-weight:800;background:#111827;border:1px solid rgba(255,255,255,.12);padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums}
   main{height:calc(100dvh - 48px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
-  .stage{
-    position:relative;flex:1;border:1px solid rgba(255,255,255,.06);
-    border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#0b1023)
-  }
+  .stage{position:relative;flex:1;border:1px solid rgba(255,255,255,.06);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#0b1023)}
   canvas{width:100%;height:100%;display:block;touch-action:none}
-  .overlay{
-    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    background:rgba(0,0,0,.28);text-align:center;gap:12px;flex-direction:column
-  }
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.28);text-align:center;gap:12px;flex-direction:column}
   .sheet{background:#0b1220;border:1px solid rgba(255,255,255,.16);padding:18px;border-radius:14px;max-width:90vw;box-shadow:0 20px 50px rgba(0,0,0,.55)}
-  .btn{
-    appearance:none;border:1px solid rgba(255,255,255,.2);background:#1f2937;color:var(--text);
-    padding:12px 20px;border-radius:12px;cursor:pointer;font-weight:700;touch-action:manipulation
-  }
+  .btn{appearance:none;border:1px solid rgba(255,255,255,.2);background:#1f2937;color:var(--text);padding:12px 20px;border-radius:12px;cursor:pointer;font-weight:700;touch-action:manipulation}
   .btn:active{transform:translateY(1px)}
   .hidden{display:none}
 </style>
@@ -56,13 +47,14 @@
   </main>
 
 <script>
-/* ====== 設定 ====== */
+/* ====== 設定（ブロックは画面幅に応じて可変） ====== */
 const CFG = {
   paddleW: 140, paddleH: 16, paddleSpeed: 900,
   ballR: 10, baseBallSpeed: 420, speedCap: 900,
-  rows: 6, cols: 9, brickW: 64, brickH: 22, brickGap: 8, topOffset: 90,
-  addBallEvery: 7,
-  speedUpFactor: 1.12
+  rows: 6, cols: 9,
+  // これらは fitCanvas() で画面サイズから再計算して上書きします
+  brickW: 64, brickH: 22, brickGap: 8, topOffset: 90,
+  addBallEvery: 7, speedUpFactor: 1.12
 };
 
 /* ====== 要素 ====== */
@@ -73,11 +65,21 @@ const stage = $('#stage');
 const overlay = $('#overlay'), titleEl = $('#title'), subEl = $('#sub'), startBtn = $('#btnStart');
 const scoreEl = $('#score');
 
-/* ====== レイアウト（1画面完結 & パドル見切れ防止） ====== */
+/* ====== レイアウト（はみ出し防止の肝） ====== */
 function fitCanvas(){
   const rect = stage.getBoundingClientRect();
   canvas.width  = Math.max(320, Math.floor(rect.width));
   canvas.height = Math.max(420, Math.floor(rect.height));
+
+  // 画面幅から「隙間・ブロック幅・高さ・上端オフセット」を自動計算
+  const margin = Math.floor(canvas.width * 0.04);                      // 左右マージン（4%）
+  CFG.brickGap  = Math.max(6, Math.floor(canvas.width * 0.012));       // ブロック間の隙間（最低6px）
+  CFG.brickW    = Math.floor((canvas.width - 2*margin - (CFG.cols-1)*CFG.brickGap) / CFG.cols);
+  CFG.brickW    = Math.max(24, CFG.brickW);                             // 万一の極小画面でも潰れすぎない
+  CFG.brickH    = Math.max(14, Math.floor(CFG.brickW * 0.34));          // 幅に対する比率で高さ
+  CFG.topOffset = Math.max(60, Math.floor(canvas.height * 0.08));       // 画面上部の余白
+
+  // パドルのY位置も再調整（見切れ防止）
   if (paddle) {
     const bottomMargin = Math.max(60, canvas.height * 0.08);
     paddle.y = canvas.height - bottomMargin;
@@ -97,9 +99,12 @@ function reset(){
   score=0; destroyed=0; speedMult=1; balls.length=0; bricks.length=0;
   const bottomMargin = Math.max(60, canvas.height * 0.08);
   paddle={x:canvas.width/2, y:canvas.height - bottomMargin, w:CFG.paddleW, h:CFG.paddleH};
+
   addBall(true);
+
+  // 画面幅から計算した値を使ってブロックを作成（必ず収まる）
   const totalW = CFG.cols*CFG.brickW + (CFG.cols-1)*CFG.brickGap;
-  const startX = Math.max(8, (canvas.width-totalW)/2);
+  const startX = Math.floor((canvas.width - totalW)/2);
   for(let r=0;r<CFG.rows;r++){
     for(let c=0;c<CFG.cols;c++){
       const x = startX + c*(CFG.brickW+CFG.brickGap);
@@ -145,10 +150,13 @@ function setOverlay(show, titleText, subText, showStartBtn=true){
 /* ====== 描画 ====== */
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
+  // パドル
   ctx.fillStyle='#22d3ee';
   ctx.fillRect(paddle.x-paddle.w/2, paddle.y-paddle.h/2, paddle.w, paddle.h);
+  // ボール
   ctx.fillStyle= '#fbbf24';
   for(const b of balls){ ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); }
+  // ブロック
   ctx.fillStyle='#94a3b8';
   for(const br of bricks){ if(!br.alive) continue; ctx.fillRect(br.x,br.y,br.w,br.h); }
 }
@@ -158,7 +166,7 @@ let keyL=false,keyR=false;
 addEventListener('keydown', e=>{
   if(e.key==='ArrowLeft') keyL=true;
   if(e.key==='ArrowRight') keyR=true;
-  if((e.key==='Enter' || e.key===' ') && !running) start(); // Enter / Space でも開始
+  if((e.key==='Enter' || e.key===' ') && !running) start();
 });
 addEventListener('keyup',   e=>{
   if(e.key==='ArrowLeft') keyL=false;
@@ -166,7 +174,7 @@ addEventListener('keyup',   e=>{
 });
 function tickKeys(dt){
   let dir=0; if(keyL)dir-=1; if(keyR)dir+=1;
-  paddle.x += CFG.paddleSpeed*dt*dir;
+  paddle.x += Math.min(1400, CFG.paddleSpeed)*dt*dir; // スマホでも動かしやすいよう少し上限
   paddle.x = clamp(paddle.x, paddle.w/2, canvas.width-paddle.w/2);
 }
 function handlePointer(clientX){
@@ -196,7 +204,6 @@ function reflectOnPaddle(ball){
 function loop(t){
   if(!running){ lastT=t; requestAnimationFrame(loop); return; }
   const dt = Math.min(32, t-lastT)/1000; lastT=t;
-  if(paused){ requestAnimationFrame(loop); return; }
 
   tickKeys(dt);
 
@@ -242,21 +249,16 @@ function loop(t){
 }
 
 /* ====== 制御 ====== */
-function start(){
-  fitCanvas();   // サイズ確定
-  reset();       // 初期化
-  running=true; paused=false;
-  setOverlay(false);
-}
+function start(){ fitCanvas(); reset(); running=true; setOverlay(false); }
 function end(win){
   running=false;
   setOverlay(true, win?'CLEAR!':'GAME OVER!', 'もう一度遊ぶには START / 画面タップ / Enter / Space', true);
 }
 
-/* ====== 開始トリガー（複数） ====== */
+/* ====== 開始トリガー ====== */
 startBtn.addEventListener('click', ()=>{ if(!running) start(); });
-overlay.addEventListener('click',   (e)=>{ if(!running) start(); });
-stage  .addEventListener('click',   (e)=>{ if(!running) start(); });
+overlay.addEventListener('click',   ()=>{ if(!running) start(); });
+stage  .addEventListener('click',   ()=>{ if(!running) start(); });
 
 /* 初期表示 */
 fitCanvas();
