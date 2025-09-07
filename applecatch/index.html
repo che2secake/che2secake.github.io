@@ -6,8 +6,7 @@
 <title>リンゴキャッチゲーム</title>
 <style>
   :root{
-    --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af;
-    --gold:#fbbf24;
+    --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af; --gold:#fbbf24;
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
@@ -43,7 +42,7 @@
   <main>
     <div class="stage" id="stage">
       <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
-      <div id="overlay" class="overlay" role="dialog" aria-modal="true" tabindex="0">
+      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
         <div class="sheet">
           <div id="title" style="font-weight:800;font-size:22px;margin-bottom:8px">START</div>
           <div id="sub" style="color:var(--muted);font-size:12px">
@@ -52,32 +51,25 @@
             1つでも取り逃すとゲームオーバー。
           </div>
         </div>
-        <button id="btnStart" class="btn" type="button" aria-label="ゲーム開始">START</button>
+        <button id="btnStart" class="btn" type="button" aria-label="開始">START</button>
       </div>
     </div>
   </main>
 
 <script>
-/* ====== 設定 ====== */
+/* ========= 設定 ========= */
 const CFG = {
-  basketW: 140,
-  basketH: 36,
-  basketSpeed: 900,
-
-  appleR: 19,             // 通常リンゴの半径（1.2倍）
-  baseFall: 260,
-  levelFallAdd: 70,
-
-  spawnEveryMs: 450,      // 平均スポーン間隔（レベルで短縮）
-  levelUpEvery: 10,
-
+  basketW: 140, basketH: 36, basketSpeed: 900,
+  appleR: 19, baseFall: 260, levelFallAdd: 70,
+  spawnEveryMs: 450, levelUpEvery: 10,
   goldenChance: 0.15,
-  scoreNormal: 1,
-  scoreGolden: 5,
-  scoreSpecial: 10        // 特大リンゴのスコア
+  // スコア
+  scoreNormal: 1, scoreGolden: 5, scoreSpecial: 10, // 特大リンゴ
+  // 特大リンゴ（直径2.5倍）
+  specialRate: 0.01, specialScale: 2.5
 };
 
-/* ====== 要素 ====== */
+/* ========= 要素 ========= */
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const $ = s=>document.querySelector(s);
@@ -85,7 +77,7 @@ const stage = $('#stage');
 const overlay = $('#overlay'), titleEl = $('#title'), subEl = $('#sub'), startBtn = $('#btnStart');
 const scoreEl = $('#score');
 
-/* ====== レイアウト ====== */
+/* ========= レイアウト ========= */
 function fitCanvas(){
   const rect = stage.getBoundingClientRect();
   canvas.width  = Math.max(320, Math.floor(rect.width));
@@ -97,44 +89,61 @@ function fitCanvas(){
 }
 addEventListener('resize', fitCanvas, {passive:true});
 
-/* ====== 状態 ====== */
-let running = false, lastT = 0;
+/* ========= 状態（state machine） =========
+   idle     : 開始待ち
+   playing  : プレイ中
+   gameover : 結果表示中（RESTART待ち）
+*/
+let state = 'idle';
+let lastT = 0;
+
 let score = 0, caught = 0, level = 0;
 let basket;
-let apples = []; // {x,y,r,vy,golden,special}
+let apples = [];     // {x,y,r,vy,golden,special}
 let spawnTimer = 0, nextSpawn = 0;
-let keyL=false, keyR=false; // ← 入力フラグをグローバルで持ち、start()で毎回リセット
 
-/* ====== 初期化 ====== */
-function reset(){
-  // すべての状態を初期化（何度呼んでも安全）
+// 入力フラグ
+let keyL=false, keyR=false;
+
+/* ========= 初期化 ========= */
+function fullReset(){
+  // ステートを初期状態へ
+  state = 'idle';
+  lastT = 0;
   score = 0; caught = 0; level = 0;
   apples.length = 0;
   spawnTimer = 0; nextSpawn = 0;
-  keyL = keyR = false; // ← 押しっぱなし状態が残っていてもクリア
+  keyL = keyR = false;
 
+  // キャンバス・バスケット
+  fitCanvas();
   const bottom = Math.max(60, canvas.height * 0.08);
   basket = { x: canvas.width/2, y: canvas.height - bottom, w: CFG.basketW, h: CFG.basketH };
 
+  // 次のスポーン時間（テンポ良く1個ずつ）
   nextSpawn = pickNextSpawn();
-  updateHUD();
+
+  // UI
+  scoreEl.textContent = '0';
+  startBtn.textContent = 'START';
+  titleEl.textContent = 'START';
+  subEl.innerHTML = 'カゴを左右に動かして上から落ちるリンゴをキャッチ！<br>金のリンゴは高得点。特大リンゴは超ボーナス。<br>1つでも取り逃すとゲームオーバー。';
+  overlay.classList.remove('hidden');
 }
 
-/* ====== スポーン（テンポよく1個ずつ） ====== */
+/* ========= スポーン（1個ずつ・テンポよく） ========= */
 function pickNextSpawn(){
   const base = Math.max(180, CFG.spawnEveryMs - level*40);
   return base * (0.85 + Math.random() * 0.40);
 }
 function spawnOneApple(){
+  // 位置・種類決定
   let r = CFG.appleR;
   let special = false;
-
-  // 100個に1個の確率で特大リンゴ（直径2.5倍）
-  if (Math.random() < 0.01) {
-    r = CFG.appleR * 2.5;
+  if (Math.random() < CFG.specialRate) {
+    r = Math.round(CFG.appleR * CFG.specialScale);
     special = true;
   }
-
   const margin = r + 8;
   const x = Math.random() * (canvas.width - margin*2) + margin;
   const golden = !special && Math.random() < CFG.goldenChance; // 特大はゴールド化しない
@@ -143,14 +152,17 @@ function spawnOneApple(){
   apples.push({ x, y: -r, r, vy, golden, special });
 }
 
-/* ====== HUD ====== */
-function updateHUD(){ scoreEl.textContent = score; }
+/* ========= HUD ========= */
+function updateHUD(){ scoreEl.textContent = String(score); }
 
-/* ====== 入力 ====== */
+/* ========= 入力 ========= */
 addEventListener('keydown', e=>{
   if(e.key==='ArrowLeft') keyL = true;
   if(e.key==='ArrowRight') keyR = true;
-  if((e.key==='Enter' || e.key===' ') && !running) start();
+  if((e.key==='Enter' || e.key===' ') && state !== 'playing'){
+    // Enter/Space でも開始
+    safeStart();
+  }
 });
 addEventListener('keyup', e=>{
   if(e.key==='ArrowLeft') keyL = false;
@@ -164,42 +176,25 @@ function handlePointer(clientX){
 canvas.addEventListener('pointerdown', e=>handlePointer(e.clientX));
 canvas.addEventListener('pointermove', e=>{ if(e.buttons) handlePointer(e.clientX); });
 
-/* ====== 当たり判定 ====== */
+/* ========= 判定・描画 ========= */
 function circleRectHit(cx, cy, cr, rx, ry, rw, rh){
   const nx = Math.max(rx, Math.min(cx, rx+rw));
   const ny = Math.max(ry, Math.min(cy, ry+rh));
   const dx = cx - nx, dy = cy - ny;
   return dx*dx + dy*dy <= cr*cr;
 }
-
-/* ====== 描画 ====== */
 function drawBasket(){
   const {x,y,w,h} = basket;
   const main = '#cfa97a', shade = '#b78e5c';
-  ctx.fillStyle = 'rgba(207,169,122,0.18)';
-  ctx.beginPath(); ctx.arc(x, y, w*0.62, Math.PI, 0); ctx.fill();
-  ctx.fillStyle = main;
-  ctx.fillRect(x-w/2, y-h/2, w, h);
-  ctx.fillStyle = shade;
-  ctx.fillRect(x-w/2, y-h/2, w, 3);
+  ctx.fillStyle = 'rgba(207,169,122,0.18)'; ctx.beginPath(); ctx.arc(x, y, w*0.62, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = main;  ctx.fillRect(x-w/2, y-h/2, w, h);
+  ctx.fillStyle = shade; ctx.fillRect(x-w/2, y-h/2, w, 3);
 
   // メッシュ
-  ctx.save();
-  ctx.strokeStyle = 'rgba(90,60,30,0.38)';
-  ctx.lineWidth = 1;
+  ctx.save(); ctx.strokeStyle = 'rgba(90,60,30,0.38)'; ctx.lineWidth = 1;
   const left = x-w/2, top = y-h/2, right = x+w/2, bottom = y+h/2;
-  for(let d=-w; d<=w; d+=10){
-    ctx.beginPath();
-    ctx.moveTo(left + d, top);
-    ctx.lineTo(left + d + h, bottom);
-    ctx.stroke();
-  }
-  for(let d=-w; d<=w; d+=10){
-    ctx.beginPath();
-    ctx.moveTo(right - d, top);
-    ctx.lineTo(right - d - h, bottom);
-    ctx.stroke();
-  }
+  for(let d=-w; d<=w; d+=10){ ctx.beginPath(); ctx.moveTo(left + d, top); ctx.lineTo(left + d + h, bottom); ctx.stroke(); }
+  for(let d=-w; d<=w; d+=10){ ctx.beginPath(); ctx.moveTo(right - d, top); ctx.lineTo(right - d - h, bottom); ctx.stroke(); }
   ctx.restore();
 }
 function drawApple(a){
@@ -213,103 +208,107 @@ function drawApple(a){
     ctx.moveTo(a.x+4, a.y+2); ctx.lineTo(a.x+8, a.y-2); ctx.stroke();
   }
   if(a.special){
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(a.x, a.y, a.r+2, 0, Math.PI*2);
-    ctx.stroke();
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(a.x, a.y, a.r+2, 0, Math.PI*2); ctx.stroke();
   }
 }
 
-/* ====== メインループ ====== */
+/* ========= ループ ========= */
 function loop(t){
-  if(!running){ lastT=t; requestAnimationFrame(loop); return; }
-  const dt = Math.min(32, t - lastT) / 1000; lastT = t;
+  const dt = Math.min(32, t - lastT) / 1000 || 0;  // idle中も動かす
+  lastT = t;
 
-  // 移動
-  const dx = (keyR - keyL) * CFG.basketSpeed * dt;
-  basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, basket.x + dx));
+  // 画面クリア
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // スポーン（テンポよく1個ずつ）
-  spawnTimer += dt*1000;
-  if(spawnTimer >= nextSpawn){
-    spawnTimer = 0;
-    spawnOneApple();
-    nextSpawn = pickNextSpawn();
-  }
+  if(state === 'playing'){
+    // 入力移動
+    const dx = (keyR - keyL) * CFG.basketSpeed * dt;
+    basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, basket.x + dx));
 
-  // 進行
-  for(let i=apples.length-1;i>=0;i--){
-    const a = apples[i];
-    a.y += a.vy * dt;
-
-    // キャッチ
-    if(circleRectHit(a.x,a.y,a.r,basket.x-basket.w/2,basket.y-basket.h/2-6,basket.w,basket.h+14)){
-      if(a.special){
-        score += CFG.scoreSpecial;
-      }else{
-        score += a.golden ? CFG.scoreGolden : CFG.scoreNormal;
-      }
-      caught++;
-      apples.splice(i,1);
-      updateHUD();
-      if(caught>0 && caught % CFG.levelUpEvery===0) level++;
-      continue;
+    // スポーン（1個ずつ）
+    spawnTimer += dt*1000;
+    if(spawnTimer >= nextSpawn){
+      spawnTimer = 0;
+      spawnOneApple();
+      nextSpawn = pickNextSpawn();
     }
 
-    // 取り逃し → 終了
-    if(a.y - a.r > canvas.height){
-      end(false);
-      return;
+    // 進行
+    for(let i=apples.length-1;i>=0;i--){
+      const a = apples[i];
+      a.y += a.vy * dt;
+
+      // キャッチ
+      if(circleRectHit(a.x,a.y,a.r, basket.x-basket.w/2, basket.y-basket.h/2-6, basket.w, basket.h+14)){
+        if(a.special){ score += CFG.scoreSpecial; }
+        else{ score += a.golden ? CFG.scoreGolden : CFG.scoreNormal; }
+        caught++;
+        apples.splice(i,1);
+        updateHUD();
+        if(caught>0 && caught % CFG.levelUpEvery===0) level++;
+        continue;
+      }
+
+      // 取り逃し → gameoverへ
+      if(a.y - a.r > canvas.height){
+        toGameOver();
+        // 描画だけして抜ける
+        drawBasket(); apples.forEach(drawApple);
+        requestAnimationFrame(loop);
+        return;
+      }
     }
   }
 
   // 描画
-  ctx.clearRect(0,0,canvas.width,canvas.height);
   apples.forEach(drawApple);
   drawBasket();
 
   requestAnimationFrame(loop);
 }
 
-/* ====== 制御 ====== */
-function start(){
-  // 何度押しても安全に “完全初期化 → 開始”
-  fitCanvas();
-  reset();
-  running = true;
-  setOverlay(false,'','',false);
+/* ========= 状態遷移 ========= */
+function toPlaying(){
+  state = 'playing';
+  overlay.classList.add('hidden');
+  // 念のため入力フラグをクリア
+  keyL = keyR = false;
 }
-function end(win){
-  running = false;
-  // ボタンラベルを RESTART にして明確化
-  setOverlay(true, win?'CLEAR!':'GAME OVER!', `SCORE: ${score} — RESTARTで再挑戦`, true);
+function toGameOver(){
+  state = 'gameover';
+  overlay.classList.remove('hidden');
+  titleEl.textContent = 'GAME OVER!';
+  subEl.innerHTML = `SCORE: ${score} — RESTART で再挑戦`;
   startBtn.textContent = 'RESTART';
 }
-function setOverlay(show, titleText, subText, showBtn=true){
-  if(titleText!==undefined && titleText!=='') titleEl.textContent = titleText;
-  if(subText!==undefined && subText!=='') subEl.innerHTML = subText;
-  startBtn.classList.toggle('hidden', !showBtn);
-  overlay.classList.toggle('hidden', !show);
-  if (show) overlay.focus();
+
+/* ========= 開始処理（デバウンス付き） ========= */
+let starting = false;
+function safeStart(){
+  if(starting) return;     // 多重押し防止
+  if(state === 'playing') return;
+  starting = true;
+
+  // 完全初期化 → playing へ（毎回クリーンスタート）
+  fullReset();
+  toPlaying();
+
+  // 直後のタップ連続を吸収
+  setTimeout(()=>{ starting = false; }, 120);
 }
 
-/* ====== 開始トリガー（iPhoneでも確実に） ====== */
-function startSafe(e){
-  if(e){ e.preventDefault?.(); e.stopPropagation?.(); }
-  start();
+/* ========= ボタンだけで開始（誤作動を防止） ========= */
+function onBtn(e){
+  e?.preventDefault?.(); e?.stopPropagation?.();
+  safeStart();
 }
-startBtn.addEventListener('pointerdown', startSafe, {passive:false});
-startBtn.addEventListener('touchstart', startSafe, {passive:false});
-startBtn.addEventListener('click', startSafe);
-overlay.addEventListener('pointerdown', startSafe, {passive:false});
-overlay.addEventListener('touchstart', startSafe, {passive:false});
-overlay.addEventListener('click', startSafe);
-// ※ 誤タップ開始を防ぐため stage クリック開始は“しない”
+startBtn.addEventListener('click', onBtn);
+startBtn.addEventListener('pointerdown', onBtn);
+startBtn.addEventListener('touchstart', onBtn, {passive:false});
 
-/* 初期表示 */
-fitCanvas();
-setOverlay(true,'START','タップ/クリックで開始（スマホ：ドラッグ/スワイプ、PC：← → / Enter / Space）',true);
+/* 初期起動 */
+fullReset();
 requestAnimationFrame(loop);
 </script>
 </body>
