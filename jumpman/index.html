@@ -6,94 +6,132 @@
 <title>ジャンプマンゲーム</title>
 <style>
   :root{
-    --bg:#f6f7fb; --panel:#ffffff; --text:#111827; --muted:#4b5563;
-    --fg:#000000;        /* 人＝黒 */
-    --block:#000000;     /* ブロック＝黒 */
+    --bg:#f6f7fb; --panel:#ffffff; --text:#111827;
+    --fg:#000000;           /* 人（黒） */
+    --block:#000000;        /* ブロック（黒） */
     --ground:#e5e7eb; --border:#e5e7eb;
     --shadow:0 8px 24px rgba(0,0,0,.08);
-    --accent:#ef4444;    /* JUMPボタン赤 */
+    --accent:#ef4444;       /* JUMPボタン赤 */
+    --footerH:86px;         /* フッター（JUMPバー）の高さ */
   }
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
+  html,body{
+    height:100%;margin:0;background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
+    overflow:hidden;
+  }
   header{
-    padding:12px 16px;border-bottom:1px solid var(--border);background:var(--panel);
+    padding:10px 14px;border-bottom:1px solid var(--border);background:var(--panel);
     display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:var(--shadow)
   }
-  h1{margin:0;font-size:18px;white-space:nowrap}
+  h1{margin:0;font-size:16px;white-space:nowrap}
   .score{
     font-weight:800;background:#f3f4f6;border:1px solid var(--border);
     color:#111827;padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums
   }
-  main{height:calc(100dvh - 56px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
+
+  /* レイアウト：上がゲーム、下がフッター（JUMP） */
+  main{
+    height:calc(100dvh - 48px);
+    max-width:100vw; margin:0 auto; display:flex; flex-direction:column;
+  }
   .stage{
-    position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;
-    background:linear-gradient(180deg,#ffffff,#f6f7fb);box-shadow:var(--shadow)
+    position:relative; flex:1; display:flex; flex-direction:column;
+    border:1px solid var(--border); border-radius:12px; overflow:hidden;
+    margin:12px; margin-bottom:0; background:linear-gradient(180deg,#ffffff,#f6f7fb); box-shadow:var(--shadow);
   }
-  canvas{width:100%;height:100%;display:block;touch-action:none}
+  .gamewrap{
+    position:relative; flex:1; /* ← キャンバス領域（フッターと分離） */
+  }
+  canvas{
+    width:100%; height:100%; display:block; touch-action:none;
+  }
 
-  /* START/RESTARTは無装飾ボタンのみ */
-  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:12px;flex-direction:column;pointer-events:none}
-  .overlay .plain{pointer-events:auto;background:transparent;border:1px solid #111;color:#111;padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer}
-  .overlay.hidden{display:none}
+  /* START/RESTART：無装飾ボタンのみ（キャンバス上、中央） */
+  .overlay{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    pointer-events:none;
+  }
+  .overlay .plain{
+    pointer-events:auto; background:transparent; border:1px solid #111; color:#111;
+    padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer;
+  }
+  .overlay.hidden{ display:none; }
 
-  /* 画面下のJUMPボタン（スマホ用） */
-  .jumpbar{position:absolute;left:0;right:0;bottom:10px;display:flex;justify-content:center;pointer-events:none}
+  /* ★ 画面最下部のフッター（JUMPボタン置き場） */
+  .footer{
+    position:relative; height:var(--footerH);
+    padding:8px max(env(safe-area-inset-right),12px) calc(max(env(safe-area-inset-bottom),8px)) max(env(safe-area-inset-left),12px);
+    display:flex; align-items:center; justify-content:center; gap:12px;
+    background:var(--panel); border-top:1px solid var(--border);
+  }
   .jumpbtn{
-    pointer-events:auto;min-width:200px;width:60%;max-width:520px;
-    padding:16px 20px;border-radius:14px;appearance:none;border:2px solid #dc2626;background:var(--accent);color:#fff;
-    font-size:20px;font-weight:900;letter-spacing:.03em;box-shadow:0 8px 16px rgba(239,68,68,.25);touch-action:manipulation
+    min-width:200px; width:min(56vw,520px);
+    padding:14px 18px; border-radius:14px;
+    appearance:none; border:2px solid #dc2626; background:var(--accent); color:#fff;
+    font-size:20px; font-weight:900; letter-spacing:.03em; box-shadow:0 8px 16px rgba(239,68,68,.25);
+    touch-action:manipulation;
   }
-  .jumpbtn:active{transform:translateY(1px);filter:brightness(.95)}
-  @media (min-width:980px){ .jumpbtn{ width:40%; } }
+  .jumpbtn:active{ transform:translateY(1px); filter:brightness(.95); }
+
+  /* 横向き推奨の微調整（横ではヘッダ文字を少し小さく） */
+  @media (orientation:landscape){
+    h1{ font-size:15px; }
+    .jumpbtn{ width:min(40vw,520px); }
+  }
 </style>
 </head>
 <body>
   <header>
-    <h1>ジャンプマンゲーム</h1>
+    <h1>ジャンプマンゲーム（横向き推奨）</h1>
     <div class="score">TIME: <span id="score">0.0</span>s</div>
   </header>
 
   <main>
-    <div class="stage" id="stage">
-      <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
+    <section class="stage" id="stage">
+      <!-- キャンバス領域（JUMPボタンと分離） -->
+      <div class="gamewrap" id="gamewrap">
+        <canvas id="game" width="960" height="540" aria-label="ゲーム画面"></canvas>
 
-      <!-- 無装飾のSTART/RESTART -->
-      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
-        <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
+        <!-- 無装飾のSTART/RESTART -->
+        <div id="overlay" class="overlay" role="dialog" aria-modal="true">
+          <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
+        </div>
       </div>
 
-      <!-- 下部JUMPボタン -->
-      <div class="jumpbar">
+      <!-- ★ 最下部フッター（ブロックが流れてこないエリア） -->
+      <div class="footer" id="footer">
         <button id="jumpBtn" class="jumpbtn" type="button" aria-label="ジャンプ">JUMP!</button>
       </div>
-    </div>
+    </section>
   </main>
 
 <script>
 /* ===== 状態管理 ===== */
 let state='idle', starting=false, lastT=0, playStartAt=0;
 
-const canvas=document.getElementById('game');
-const ctx=canvas.getContext('2d');
-const stage=document.getElementById('stage');
-const scoreEl=document.getElementById('score');
-const overlay=document.getElementById('overlay');
-const startBtn=document.getElementById('btnStart');
-const jumpBtn=document.getElementById('jumpBtn');
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
+const gamewrap = document.getElementById('gamewrap');
+const footer = document.getElementById('footer');
+const scoreEl = document.getElementById('score');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('btnStart');
+const jumpBtn  = document.getElementById('jumpBtn');
 
 function fitCanvas(){
-  const rect=stage.getBoundingClientRect();
-  canvas.width=Math.max(320,Math.floor(rect.width));
-  canvas.height=Math.max(420,Math.floor(rect.height));
+  const rect = gamewrap.getBoundingClientRect();      // ← キャンバスは「フッター除外領域」にフィット
+  canvas.width  = Math.max(480, Math.floor(rect.width));
+  canvas.height = Math.max(270, Math.floor(rect.height));
   onResize();
 }
-addEventListener('resize',fitCanvas,{passive:true});
+addEventListener('resize', fitCanvas, {passive:true});
 
 function toPlaying(){
   state='playing';
   overlay.classList.add('hidden');
-  keyJump=false;jumpPressed=false;jumpHeldMs=0;
+  keyJump=false; jumpPressed=false; jumpHeldMs=0;
   playStartAt=performance.now(); // 時間スコア開始
 }
 function toGameOver(){
@@ -103,7 +141,7 @@ function toGameOver(){
 }
 function fullReset(){
   state='idle'; starting=false; lastT=0;
-  keyJump=false;jumpPressed=false;jumpHeldMs=0;
+  keyJump=false; jumpPressed=false; jumpHeldMs=0;
   fitCanvas();
   initGameObjects();
   updateHUD(0);
@@ -111,183 +149,187 @@ function fullReset(){
   overlay.classList.remove('hidden');
 }
 function safeStart(){
-  if(starting||state==='playing')return;
-  starting=true;
-  fullReset();
-  toPlaying();
-  setTimeout(()=>{starting=false},120);
+  if(starting||state==='playing') return;
+  starting=true; fullReset(); toPlaying();
+  setTimeout(()=>{ starting=false; }, 120);
 }
-function onBtn(e){e?.preventDefault?.();e?.stopPropagation?.();safeStart();}
-startBtn.addEventListener('click',onBtn);
-startBtn.addEventListener('pointerdown',onBtn);
-startBtn.addEventListener('touchstart',onBtn,{passive:false});
+function onBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
+startBtn.addEventListener('click', onBtn);
+startBtn.addEventListener('pointerdown', onBtn);
+startBtn.addEventListener('touchstart', onBtn, {passive:false});
 
-/* ===== ゲーム設定（ズームアウト感の調整込み） ===== */
+/* ===== ゲーム設定（横向き前提＋ズームアウト気味） ===== */
 const CFG={
-  groundHRatio:0.12,       // ★ 地面薄め（視界を広く）
+  groundHRatio:0.14,       // 地面薄め（視界広め）
   grav:2000,
-  jumpBoostAcc:3600,       // ★ 弱め：飛び過ぎ防止
+  jumpBoostAcc:3600,
   maxHoldMs:160,
   jumpCooldownMs:90,
   maxJumps:3,
-  initialVyGround:-540,    // ★ 初速控えめ
+  initialVyGround:-540,
   initialVyAir:-500,
 
-  player:{w:40,h:66},      // ★ 少し小さく
+  player:{w:38,h:64},      // 横画面で少し小さめ
+  block:{w:38,h:56,speed:420,heightMaxScale:3.0},
 
-  block:{w:40,h:60,speed:430,heightMaxScale:3.0}, // ★ 速度やや遅く・サイズ少し小さく
-  spawnGapMin:560,         // ★ 出現間隔をやや長め
+  spawnGapMin:560,         // 反応時間確保のため長め
   spawnGapMax:1900,
-  spawnSpeedupPer100Sec:0.10, // 経過時間でテンポUP（上限あり）
+  spawnSpeedupPer100Sec:0.10,
 
-  // ズームアウト感：出現を画面よりさらに外から
-  extraSpawnOffsetMin:180, // ★ 画面右のさらに先から見えて入ってくる
-  extraSpawnOffsetMax:260
+  extraSpawnOffsetMin:220, // 画面のさらに右外から出す
+  extraSpawnOffsetMax:300
 };
 
 let groundY=0, ceilingY=0;
 let player, blocks=[], spawnTimer=0, nextSpawn=0;
 
-// 可変・3段ジャンプ
+// 3段ジャンプ・可変ジャンプ
 let jumpsLeft=CFG.maxJumps, keyJump=false, jumpPressed=false, jumpHeldMs=0, lastJumpReleaseAt=0;
 
 function initGameObjects(){
-  groundY=Math.floor(canvas.height*(1-CFG.groundHRatio));
-  ceilingY=Math.max(40,Math.floor(canvas.height*0.16)); // ★ 天井少し下げて収まり良く
-  player={x:Math.floor(canvas.width*0.14), // ★ さらに左寄せ（先が見える）
-          y:groundY-CFG.player.h, vx:0, vy:0,
-          w:CFG.player.w,h:CFG.player.h,onGround:true};
-  jumpsLeft=CFG.maxJumps;
-  blocks.length=0;
-  spawnTimer=0;
-  nextSpawn=pickNextSpawn();
+  groundY = Math.floor(canvas.height * (1 - CFG.groundHRatio));
+  ceilingY = Math.max(30, Math.floor(canvas.height * 0.12)); // 上に出ないよう制限
+  player = {
+    x: Math.floor(canvas.width * 0.12), // 横はさらに左寄せで先が見える
+    y: groundY - CFG.player.h,
+    vx: 0, vy: 0, w: CFG.player.w, h: CFG.player.h, onGround:true
+  };
+  jumpsLeft = CFG.maxJumps;
+  blocks.length = 0;
+  spawnTimer = 0;
+  nextSpawn = pickNextSpawn();
 }
 
 function onResize(){
-  groundY=Math.floor(canvas.height*(1-CFG.groundHRatio));
-  ceilingY=Math.max(40,Math.floor(canvas.height*0.16));
+  groundY = Math.floor(canvas.height * (1 - CFG.groundHRatio));
+  ceilingY = Math.max(30, Math.floor(canvas.height * 0.12));
   if(player){
-    const bottom=player.y+player.h;
-    const diff=groundY-bottom;
-    player.y+=diff;
-    if(player.y+player.h>=groundY){
-      player.y=groundY-player.h; player.vy=0; player.onGround=true; jumpsLeft=CFG.maxJumps;
+    const bottom = player.y + player.h;
+    const diff = groundY - bottom;
+    player.y += diff;
+    if(player.y + player.h >= groundY){
+      player.y = groundY - player.h; player.vy = 0; player.onGround = true; jumpsLeft = CFG.maxJumps;
     }
   }
 }
 
 /* ===== スポーン間隔（時間で少しずつ短縮） ===== */
 function pickNextSpawn(){
-  const elapsed=Math.max(0,(performance.now()-playStartAt)/1000);
-  const factor=Math.max(0.6,1-(elapsed/100)*CFG.spawnSpeedupPer100Sec);
-  const min=CFG.spawnGapMin*factor, max=CFG.spawnGapMax*factor;
-  return min+Math.random()*(max-min);
+  const elapsed = Math.max(0, (performance.now() - playStartAt)/1000);
+  const factor = Math.max(0.6, 1 - (elapsed/100)*CFG.spawnSpeedupPer100Sec);
+  const min = CFG.spawnGapMin*factor, max = CFG.spawnGapMax*factor;
+  return min + Math.random()*(max-min);
 }
 
 /* ===== 入力 ===== */
-addEventListener('keydown',e=>{
+addEventListener('keydown', e=>{
   if(state!=='playing'){ if(e.key===' '||e.key==='ArrowUp') safeStart(); return; }
-  if(e.key===' '||e.key==='ArrowUp'){ if(!keyJump){keyJump=true;jumpPressed=true;} }
+  if(e.key===' '||e.key==='ArrowUp'){ if(!keyJump){ keyJump=true; jumpPressed=true; } }
 });
-addEventListener('keyup',e=>{
-  if(e.key===' '||e.key==='ArrowUp'){ keyJump=false;jumpPressed=false;jumpHeldMs=0;lastJumpReleaseAt=performance.now(); }
+addEventListener('keyup', e=>{
+  if(e.key===' '||e.key==='ArrowUp'){ keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); }
 });
-canvas.addEventListener('pointerdown',e=>{
-  if(state!=='playing'){ safeStart(); return; }
-  if(!keyJump){keyJump=true;jumpPressed=true;}
-});
-canvas.addEventListener('pointerup',e=>{ keyJump=false;jumpPressed=false;jumpHeldMs=0;lastJumpReleaseAt=performance.now(); });
-canvas.addEventListener('pointercancel',e=>{ keyJump=false;jumpPressed=false;jumpHeldMs=0;lastJumpReleaseAt=performance.now(); });
 
-function jumpPressStart(e){ e?.preventDefault?.();e?.stopPropagation?.(); if(state!=='playing'){ safeStart(); return; } if(!keyJump){keyJump=true;jumpPressed=true;} }
-function jumpPressEnd(e){ e?.preventDefault?.();e?.stopPropagation?.(); keyJump=false;jumpPressed=false;jumpHeldMs=0;lastJumpReleaseAt=performance.now(); }
-jumpBtn.addEventListener('pointerdown',jumpPressStart);
-jumpBtn.addEventListener('pointerup',jumpPressEnd);
-jumpBtn.addEventListener('pointercancel',jumpPressEnd);
-jumpBtn.addEventListener('touchstart',jumpPressStart,{passive:false});
-jumpBtn.addEventListener('touchend',jumpPressEnd);
-jumpBtn.addEventListener('mousedown',jumpPressStart);
-jumpBtn.addEventListener('mouseup',jumpPressEnd);
-jumpBtn.addEventListener('mouseleave',jumpPressEnd);
+/* キャンバスのタップでもジャンプ可 */
+canvas.addEventListener('pointerdown', e=>{
+  if(state!=='playing'){ safeStart(); return; }
+  if(!keyJump){ keyJump=true; jumpPressed=true; }
+});
+canvas.addEventListener('pointerup',   e=>{ keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); });
+canvas.addEventListener('pointercancel',e=>{ keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); });
+
+/* フッターのJUMPボタン（重ならない領域） */
+function jumpPressStart(e){ e?.preventDefault?.(); e?.stopPropagation?.(); if(state!=='playing'){ safeStart(); return; } if(!keyJump){ keyJump=true; jumpPressed=true; } }
+function jumpPressEnd(e){ e?.preventDefault?.(); e?.stopPropagation?.(); keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); }
+jumpBtn.addEventListener('pointerdown', jumpPressStart);
+jumpBtn.addEventListener('pointerup',   jumpPressEnd);
+jumpBtn.addEventListener('pointercancel', jumpPressEnd);
+jumpBtn.addEventListener('touchstart',  jumpPressStart, {passive:false});
+jumpBtn.addEventListener('touchend',    jumpPressEnd);
+jumpBtn.addEventListener('mousedown',   jumpPressStart);
+jumpBtn.addEventListener('mouseup',     jumpPressEnd);
+jumpBtn.addEventListener('mouseleave',  jumpPressEnd);
 
 /* ===== 更新 ===== */
 function update(dt){
   // 時間スコア
-  const elapsed=Math.max(0,(performance.now()-playStartAt)/1000);
+  const elapsed = Math.max(0, (performance.now() - playStartAt)/1000);
   updateHUD(elapsed);
 
   // スポーン
-  spawnTimer+=dt*1000;
-  if(spawnTimer>=nextSpawn){ spawnTimer=0; spawnBlock(); nextSpawn=pickNextSpawn(); }
+  spawnTimer += dt*1000;
+  if(spawnTimer >= nextSpawn){ spawnTimer = 0; spawnBlock(); nextSpawn = pickNextSpawn(); }
 
   // ジャンプ開始
-  const now=performance.now();
-  if(jumpPressed && jumpsLeft>0 && (now-lastJumpReleaseAt)>CFG.jumpCooldownMs){
-    const initVy=(player.onGround?CFG.initialVyGround:CFG.initialVyAir);
-    player.onGround=false; player.vy=initVy;
-    jumpPressed=false; jumpHeldMs=0; jumpsLeft--;
+  const now = performance.now();
+  if (jumpPressed && jumpsLeft>0 && (now - lastJumpReleaseAt) > CFG.jumpCooldownMs){
+    const initVy = (player.onGround ? CFG.initialVyGround : CFG.initialVyAir);
+    player.onGround = false; player.vy = initVy;
+    jumpPressed = false; jumpHeldMs = 0; jumpsLeft--;
   }
-  // 長押し
-  if(keyJump && !player.onGround && jumpHeldMs<CFG.maxHoldMs){
-    player.vy-=CFG.jumpBoostAcc*dt; jumpHeldMs+=dt*1000;
+  // 長押し（可変ジャンプ）
+  if (keyJump && !player.onGround && jumpHeldMs < CFG.maxHoldMs){
+    player.vy -= CFG.jumpBoostAcc * dt;
+    jumpHeldMs += dt*1000;
   }
 
   // 物理
-  player.vy+=CFG.grav*dt; player.y+=player.vy*dt;
+  player.vy += CFG.grav * dt;
+  player.y  += player.vy * dt;
 
-  // 天井
-  const headY=player.y;
-  if(headY<=ceilingY){ player.y=ceilingY; if(player.vy<0) player.vy=0; }
+  // 天井クランプ
+  const headY = player.y;
+  if(headY <= ceilingY){ player.y = ceilingY; if(player.vy < 0) player.vy = 0; }
 
   // 地面
-  if(player.y+player.h>=groundY){
-    player.y=groundY-player.h; player.vy=0;
-    if(!player.onGround){ player.onGround=true; jumpsLeft=CFG.maxJumps; jumpHeldMs=0; }
+  if(player.y + player.h >= groundY){
+    player.y = groundY - player.h; player.vy = 0;
+    if(!player.onGround){ player.onGround = true; jumpsLeft = CFG.maxJumps; jumpHeldMs = 0; }
   }
 
   // ブロック
   for(let i=blocks.length-1;i>=0;i--){
-    const b=blocks[i];
-    b.x-=b.speed*dt;
-    if(b.x+b.w<-10) blocks.splice(i,1);
+    const b = blocks[i];
+    b.x -= b.speed * dt;
+    if(b.x + b.w < -10) blocks.splice(i,1);
   }
 
   // 当たり
   for(const b of blocks){ if(rectHit(player,b)){ toGameOver(); return; } }
 }
 
-/* ===== ブロック生成（ズームアウト対応：右外から余裕をもって） ===== */
+/* ===== ブロック生成（右外から・ズームアウト感） ===== */
 function spawnBlock(){
-  const maxH=Math.min(CFG.block.h*CFG.block.heightMaxScale, groundY-ceilingY-20);
-  const h=Math.max(24, Math.round( lerp(CFG.block.h, maxH, Math.random()) ));
-  const w=Math.round( CFG.block.w*(0.9+Math.random()*0.4) );
-  const y=groundY-h;
+  const maxH = Math.min(CFG.block.h*CFG.block.heightMaxScale, groundY - ceilingY - 20);
+  const h = Math.max(24, Math.round( lerp(CFG.block.h, maxH, Math.random()) ));
+  const w = Math.round( CFG.block.w * (0.9 + Math.random()*0.4) );
+  const y = groundY - h;
+  const elapsed = Math.max(0, (performance.now()-playStartAt)/1000);
+  const speed = CFG.block.speed * (1.0 + Math.min(0.5, elapsed/60/6));
 
-  const extra=CFG.extraSpawnOffsetMin+Math.random()*(CFG.extraSpawnOffsetMax-CFG.extraSpawnOffsetMin);
-  const elapsed=Math.max(0,(performance.now()-playStartAt)/1000);
-  const speed=CFG.block.speed*(1.0+Math.min(0.5,elapsed/60/6)); // ゆるやかに加速（控えめ）
-
-  blocks.push({ x: canvas.width+extra, y, w, h, speed });
+  const extra = CFG.extraSpawnOffsetMin + Math.random()*(CFG.extraSpawnOffsetMax - CFG.extraSpawnOffsetMin);
+  blocks.push({ x: canvas.width + extra, y, w, h, speed });
 }
 
-function lerp(a,b,t){ return a+(b-a)*t; }
+function lerp(a,b,t){ return a + (b-a)*t; }
 function rectHit(a,b){ return !(a.x+a.w<b.x || b.x+b.w<a.x || a.y+a.h<b.y || b.y+b.h<a.y); }
 
 /* ===== 描画 ===== */
 function render(ctx){
   ctx.clearRect(0,0,canvas.width,canvas.height);
+  // 地面
   ctx.fillStyle='var(--ground)';
-  ctx.fillRect(0,groundY,canvas.width,canvas.height-groundY);
-
+  ctx.fillRect(0, groundY, canvas.width, canvas.height-groundY);
+  // ブロック
   ctx.fillStyle='var(--block)';
   for(const b of blocks){ ctx.fillRect(b.x,b.y,b.w,b.h); }
-
+  // 人
   drawMan(player);
 }
 function drawMan(p){
   const x=p.x+p.w/2, y=p.y+p.h;
   ctx.strokeStyle='var(--fg)'; ctx.lineWidth=5; ctx.lineCap='round';
-  ctx.beginPath(); ctx.arc(x,y-0.86*p.h,10,0,Math.PI*2); ctx.stroke();        // 頭
+  ctx.beginPath(); ctx.arc(x,y-0.86*p.h,10,0,Math.PI*2); ctx.stroke();         // 頭
   ctx.beginPath(); ctx.moveTo(x,y-0.8*p.h); ctx.lineTo(x,y-0.45*p.h); ctx.stroke(); // 胴
   const t=performance.now()*0.01, swing=Math.sin(t)*8;
   ctx.beginPath(); ctx.moveTo(x,y-0.7*p.h); ctx.lineTo(x-20+swing,y-0.55*p.h); ctx.stroke(); // 腕L
