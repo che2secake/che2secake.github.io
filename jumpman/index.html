@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>ジャンプマンゲーム</title>
+<style>
+  :root{ --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af;
+         --fg:#22d3ee; --block:#f97316; --ground:#0a1222; }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
+  header{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);background:var(--panel);
+    display:flex;align-items:center;justify-content:space-between;gap:12px}
+  h1{margin:0;font-size:18px;white-space:nowrap}
+  .score{font-weight:800;background:#111827;border:1px solid rgba(255,255,255,.12);
+    padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums}
+  main{height:calc(100dvh - 48px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
+  .stage{position:relative;flex:1;border:1px solid rgba(255,255,255,.06);border-radius:12px;overflow:hidden;
+    background:linear-gradient(180deg,#0f172a,#0b1023)}
+  canvas{width:100%;height:100%;display:block;touch-action:none}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.28);
+    text-align:center;gap:12px;flex-direction:column}
+  .sheet{background:#0b1220;border:1px solid rgba(255,255,255,.16);padding:18px;border-radius:14px;max-width:90vw;
+    box-shadow:0 20px 50px rgba(0,0,0,.55)}
+  .btn{appearance:none;border:1px solid rgba(255,255,255,.2);background:#1f2937;color:var(--text);
+    padding:12px 20px;border-radius:12px;cursor:pointer;font-weight:700;touch-action:manipulation}
+  .btn:active{transform:translateY(1px)}
+  .hint{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+  <header>
+    <h1>ジャンプマンゲーム</h1>
+    <div class="score">SCORE: <span id="score">0</span></div>
+  </header>
+
+  <main>
+    <div class="stage" id="stage">
+      <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
+
+      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
+        <div class="sheet">
+          <div id="title" style="font-weight:800;font-size:22px;margin-bottom:8px">START</div>
+          <div id="sub" class="hint">
+            右から来るブロックをジャンプで避けよう！<br>
+            押している時間だけジャンプが伸びます（スマホ：長押し / PC：スペース・上矢印）<br>
+            ぶつかったらゲームオーバー。RESTARTで再挑戦。
+          </div>
+        </div>
+        <button id="btnStart" class="btn" type="button" aria-label="開始">START</button>
+      </div>
+    </div>
+  </main>
+
+<script>
+/* ================== スタート／リスタート管理（テンプレ） ================== */
+let state = 'idle';          // 'idle' | 'playing' | 'gameover'
+let starting = false;        // 多重開始防止
+let lastT = 0;
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
+const scoreEl = document.getElementById('score');
+const overlay = document.getElementById('overlay');
+const titleEl = document.getElementById('title');
+const subEl = document.getElementById('sub');
+const startBtn = document.getElementById('btnStart');
+
+function fitCanvas(){
+  const rect = stage.getBoundingClientRect();
+  canvas.width  = Math.max(320, Math.floor(rect.width));
+  canvas.height = Math.max(420, Math.floor(rect.height));
+  onResize();
+}
+addEventListener('resize', fitCanvas, {passive:true});
+
+function toPlaying(){
+  state = 'playing';
+  overlay.classList.add('hidden');
+  keyJump = false; jumpPressed = false; jumpHeldMs = 0;
+}
+function toGameOver(){
+  state = 'gameover';
+  overlay.classList.remove('hidden');
+  titleEl.textContent = 'GAME OVER!';
+  subEl.innerHTML = `SCORE: ${score} — RESTARTで再挑戦`;
+  startBtn.textContent = 'RESTART';
+}
+function fullReset(){
+  state = 'idle'; starting = false; lastT = 0;
+  keyJump = false; jumpPressed = false; jumpHeldMs = 0;
+  fitCanvas();
+  initGameObjects();
+  updateHUD();
+  startBtn.textContent = 'START';
+  titleEl.textContent = 'START';
+  subEl.innerHTML = '右から来るブロックをジャンプで避けよう！<br>押している時間だけジャンプが伸びます（スマホ：長押し / PC：スペース・上矢印）<br>ぶつかったらゲームオーバー。RESTARTで再挑戦。';
+  overlay.classList.remove('hidden');
+}
+function safeStart(){
+  if(starting || state==='playing') return;
+  starting = true;
+  fullReset();
+  toPlaying();
+  setTimeout(()=>{ starting=false; }, 120);
+}
+function onBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
+startBtn.addEventListener('click', onBtn);
+startBtn.addEventListener('pointerdown', onBtn);
+startBtn.addEventListener('touchstart', onBtn, {passive:false});
+
+/* ================== ゲーム固有ロジック（ジャンプマン） ================== */
+const CFG = {
+  groundHRatio: 0.18,      // 画面高さに対する地面の厚み割合
+  grav: 2200,              // 重力(px/s^2)
+  jumpBoostAcc: 5200,      // 押し続け中の上向き加速度（可変ジャンプ用）
+  maxHoldMs: 220,          // 長押し最大持続（ms）…対空が「押した時間」で伸びる
+  jumpCooldownMs: 90,      // 連続ジャンプの誤発防止
+  player: { w: 46, h: 74, speedX: 0 },   // 人型サイズ
+  block:  { w: 40, h: 60, speed: 520 },  // 障害物
+  spawn:  { baseMs: 980, jitter: 420, accelPerScore: 0.10 }, // 出現テンポ（スコアで少し速く）
+  scorePerSec: 1,          // 時間スコア
+  scorePerPass: 5          // ブロック通過ボーナス
+};
+
+let score = 0;
+let groundY = 0;
+let player;
+let blocks = []; // {x,y,w,h,passed}
+let spawnTimer = 0, nextSpawn = 0;
+
+function initGameObjects(){
+  score = 0;
+  groundY = Math.floor(canvas.height * (1 - CFG.groundHRatio));
+  player = {
+    x: Math.floor(canvas.width * 0.18),
+    y: groundY - CFG.player.h,
+    vx: 0,
+    vy: 0,
+    w: CFG.player.w,
+    h: CFG.player.h,
+    onGround: true,
+    lastJumpUpAt: 0
+  };
+  blocks.length = 0;
+  spawnTimer = 0;
+  nextSpawn = pickNextSpawn();
+}
+
+function onResize(){
+  groundY = Math.floor(canvas.height * (1 - CFG.groundHRatio));
+  if (player) {
+    // 地面基準で足元を合わせる
+    const bottom = player.y + player.h;
+    const diff = groundY - bottom;
+    player.y += diff;
+  }
+}
+
+function pickNextSpawn(){
+  // スコアが上がるほどテンポが速く（最短は 520ms 程度）
+  const accel = Math.min(0.6, score * CFG.spawn.accelPerScore / 100);
+  const base = CFG.spawn.baseMs * (1 - accel);
+  const jitt = CFG.spawn.jitter;
+  return (base - jitt/2) + Math.random()*jitt;
+}
+
+/* ====== 入力：可変ジャンプ（長押しで対空が伸びる） ====== */
+let keyJump = false;      // キー（Space/ArrowUp）／タッチ中 true
+let jumpPressed = false;  // 新規押下トリガ
+let jumpHeldMs = 0;       // 押下継続ms
+let lastJumpReleaseAt = 0;
+
+addEventListener('keydown', e=>{
+  if(state!=='playing'){ if(e.key===' '||e.key==='ArrowUp') safeStart(); return; }
+  if(e.key===' ' || e.key==='ArrowUp'){
+    if(!keyJump){
+      keyJump = true; jumpPressed = true;
+    }
+  }
+});
+addEventListener('keyup', e=>{
+  if(e.key===' ' || e.key==='ArrowUp'){
+    keyJump = false; jumpPressed = false; jumpHeldMs = 0;
+    lastJumpReleaseAt = performance.now();
+  }
+});
+
+canvas.addEventListener('pointerdown', e=>{
+  if(state!=='playing'){ safeStart(); return; }
+  keyJump = true; jumpPressed = true;
+});
+canvas.addEventListener('pointerup', e=>{
+  keyJump = false; jumpPressed = false; jumpHeldMs = 0;
+  lastJumpReleaseAt = performance.now();
+});
+canvas.addEventListener('pointercancel', e=>{
+  keyJump = false; jumpPressed = false; jumpHeldMs = 0;
+  lastJumpReleaseAt = performance.now();
+});
+
+/* ====== 更新 ====== */
+function update(dt){
+  // スコア（時間経過）
+  score += CFG.scorePerSec * dt;
+
+  // スポーン
+  spawnTimer += dt*1000;
+  if(spawnTimer >= nextSpawn){
+    spawnTimer = 0;
+    spawnBlock();
+    nextSpawn = pickNextSpawn();
+  }
+
+  // 可変ジャンプ処理
+  const now = performance.now();
+  if (jumpPressed && player.onGround && (now - lastJumpReleaseAt) > CFG.jumpCooldownMs){
+    // 地上で押し始め → ジャンプ開始
+    player.onGround = false;
+    player.vy = -680;          // 初速（控えめ）…以降は押し続けで上向き加速
+    jumpPressed = false;
+    jumpHeldMs = 0;
+  }
+  if (keyJump && !player.onGround && jumpHeldMs < CFG.maxHoldMs){
+    // 長押し中は上方向加速を追加（可変ジャンプ）
+    player.vy -= CFG.jumpBoostAcc * dt;
+    jumpHeldMs += dt*1000;
+  }
+
+  // 物理
+  player.vy += CFG.grav * dt;
+  player.y  += player.vy * dt;
+
+  // 着地
+  if(player.y + player.h >= groundY){
+    player.y = groundY - player.h;
+    player.vy = 0;
+    player.onGround = true;
+  }
+
+  // ブロック進行とスコア
+  for(let i=blocks.length-1;i>=0;i--){
+    const b = blocks[i];
+    b.x -= b.speed * dt;
+    // 通過ボーナス（プレイヤーを完全に越えたら一度だけ）
+    if(!b.passed && b.x + b.w < player.x){
+      b.passed = true;
+      score += CFG.scorePerPass;
+    }
+    // 画面外で破棄
+    if(b.x + b.w < -10) blocks.splice(i,1);
+  }
+
+  // 衝突判定（AABB）
+  for(const b of blocks){
+    if(rectHit(player, b)){
+      toGameOver();
+      return;
+    }
+  }
+}
+
+function spawnBlock(){
+  // 高さや幅を少しランダム化し、リズム良く
+  const baseH = CFG.block.h;
+  const h = Math.round(baseH * (0.85 + Math.random()*0.4));      // 0.85〜1.25倍
+  const w = Math.round(CFG.block.w * (0.9 + Math.random()*0.3));  // 0.9〜1.2倍
+  const y = groundY - h;
+  const speed = CFG.block.speed * (1.0 + Math.min(0.5, score/300)); // 少しずつ速く
+  blocks.push({ x: canvas.width + 20, y, w, h, speed, passed:false });
+}
+
+function rectHit(a,b){
+  return !(a.x+a.w < b.x || b.x+b.w < a.x || a.y+a.h < b.y || b.y+b.h < a.y);
+}
+
+/* ====== 描画 ====== */
+function render(ctx){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // 地面
+  ctx.fillStyle = 'var(--ground)';
+  ctx.fillRect(0, groundY, canvas.width, canvas.height-groundY);
+
+  // ジャンプマン（人型シルエット）
+  drawMan(player);
+
+  // ブロック
+  ctx.fillStyle = 'var(--block)';
+  for(const b of blocks){
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+  }
+}
+
+function drawMan(p){
+  const x = p.x + p.w/2;
+  const y = p.y + p.h;
+  const scale = 1;
+
+  // 体幹
+  ctx.strokeStyle = 'var(--fg)';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+
+  // 頭
+  ctx.beginPath(); ctx.arc(x, y - 0.86*p.h, 9*scale, 0, Math.PI*2); ctx.stroke();
+
+  // 胴
+  ctx.beginPath(); ctx.moveTo(x, y-0.8*p.h); ctx.lineTo(x, y-0.45*p.h); ctx.stroke();
+
+  // 腕（走りっぽくスイング）
+  const t = performance.now() * 0.01;
+  const swing = Math.sin(t) * 10*scale;
+  ctx.beginPath(); ctx.moveTo(x, y-0.7*p.h); ctx.lineTo(x - 20*scale + swing, y-0.55*p.h); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y-0.7*p.h); ctx.lineTo(x + 20*scale - swing, y-0.55*p.h); ctx.stroke();
+
+  // 脚（ジャンプ中は伸び、地上はリズム）
+  const onG = p.onGround;
+  const phase = Math.cos(t*0.6);
+  const k = onG ? 1 : 0.3;
+  ctx.beginPath(); ctx.moveTo(x, y-0.45*p.h); ctx.lineTo(x - 14*scale, y - 0.06*p.h - 8*k*phase); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y-0.45*p.h); ctx.lineTo(x + 14*scale, y - 0.06*p.h + 8*k*phase); ctx.stroke();
+}
+
+/* ====== HUD ====== */
+function updateHUD(){ scoreEl.textContent = String(Math.floor(score)); }
+
+/* ====== ループ ====== */
+function loop(t){
+  const dt = Math.min(32, t - lastT) / 1000 || 0;
+  lastT = t;
+
+  if(state === 'playing'){
+    update(dt);
+  }
+  render(ctx);
+
+  requestAnimationFrame(loop);
+}
+
+/* ====== 起動 ====== */
+fullReset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
