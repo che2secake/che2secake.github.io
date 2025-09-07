@@ -7,7 +7,7 @@
   <style>
     :root{
       --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af;
-      --accent:#22d3ee; --good:#34d399; --brick:#94a3b8; --ball:#fbbf24;
+      --accent:#22d3ee; --brick:#94a3b8; --ball:#fbbf24;
     }
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif}
@@ -15,13 +15,17 @@
     h1{margin:0;font-size:clamp(18px,3.5vw,24px)}
     .sub{color:var(--muted);font-size:12px}
     main{max-width:980px;margin:0 auto;padding:16px}
-    .card{background:#0d1426;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative}
-    canvas{width:100%;height:auto;background:linear-gradient(180deg,#0f172a,#0b1023);border-radius:12px;border:1px solid rgba(255,255,255,.06);display:block}
+    .card{background:#0d1426;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
     .row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap}
     .pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#111827;border:1px solid rgba(255,255,255,.12)}
     .btn{appearance:none;border:1px solid rgba(255,255,255,.2);background:#1f2937;color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer}
     .btn:hover{background:#2b3446}
-    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+
+    /* ここが重要：キャンバス専用のステージ */
+    .stage{position:relative;border:1px solid rgba(255,255,255,.06);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#0b1023)}
+    canvas{width:100%;height:auto;display:block;touch-action:none} /* スマホのスワイプをゲームに渡す */
+
+    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.25)}
     .sheet{background:#0b1220;border:1px solid rgba(255,255,255,.16);padding:18px;border-radius:14px;max-width:90vw;box-shadow:0 20px 50px rgba(0,0,0,.55);text-align:center}
     .hint{color:var(--muted);font-size:12px}
     .hidden{display:none}
@@ -45,11 +49,15 @@
           <button id="btnRetry" class="btn">↻ リトライ</button>
         </div>
       </div>
-      <canvas id="game" width="720" height="1080"></canvas>
-      <div id="overlay" class="overlay hidden">
-        <div class="sheet">
-          <div id="title" style="font-weight:700;font-size:18px;margin-bottom:8px">タップでスタート</div>
-          <div class="hint">操作：スマホ＝ドラッグ/スワイプ、PC＝マウス/← →。ボールを弾いて上のブロックを全部消すと勝ち。落としたら終了。</div>
+
+      <!-- ステージ（キャンバス＋オーバーレイ） -->
+      <div class="stage" id="stage">
+        <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
+        <div id="overlay" class="overlay">
+          <div class="sheet">
+            <div id="title" style="font-weight:700;font-size:18px;margin-bottom:8px">タップでスタート</div>
+            <div class="hint">操作：スマホ＝ドラッグ/スワイプ、PC＝← →。ボールを弾いて上のブロックを全部消すと勝ち。落としたら終了。</div>
+          </div>
         </div>
       </div>
     </section>
@@ -64,8 +72,147 @@
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const $ = s=>document.querySelector(s);
+  const overlay = $('#overlay'), titleEl = $('#title');
+  const scoreEl = $('#score'), leftEl = $('#left'), spdEl = $('#spd');
 
   function fitCanvas(){
     const vw = Math.min(window.innerWidth, 980);
     const h = Math.floor(vw*1.5);
     canvas.style.height = h+'px';
+  }
+  fitCanvas(); window.addEventListener('resize', fitCanvas);
+
+  let running=false, paused=false, lastT=0;
+  let score=0;
+  let ball, paddle, bricks=[], bricksLeft=0, speedMult=1;
+
+  function reset(){
+    score=0; bricks = []; speedMult=1;
+    paddle={x:canvas.width/2, y:canvas.height-60, w:CFG.paddleW, h:CFG.paddleH};
+    ball={x:canvas.width/2, y:canvas.height-100, vx:CFG.ballSpeed*(Math.random()<.5?-1:1)/Math.sqrt(2), vy:-CFG.ballSpeed/Math.sqrt(2), r:CFG.ballR};
+    const totalW = CFG.cols*CFG.brickW + (CFG.cols-1)*CFG.brickGap;
+    const startX = (canvas.width-totalW)/2;
+    for(let r=0;r<CFG.rows;r++){
+      for(let c=0;c<CFG.cols;c++){
+        const x = startX + c*(CFG.brickW+CFG.brickGap);
+        const y = CFG.topOffset + r*(CFG.brickH+CFG.brickGap);
+        bricks.push({x,y,w:CFG.brickW,h:CFG.brickH,alive:true});
+      }
+    }
+    bricksLeft = bricks.length;
+    scoreEl.textContent=score; leftEl.textContent=bricksLeft; spdEl.textContent=speedMult.toFixed(1)+'x';
+  }
+  function setOverlay(show, text){ if(text) titleEl.textContent=text; overlay.classList.toggle('hidden', !show); }
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // paddle
+    ctx.fillStyle='#22d3ee';
+    ctx.fillRect(paddle.x-paddle.w/2, paddle.y-paddle.h/2, paddle.w, paddle.h);
+    // ball
+    ctx.fillStyle='#fbbf24';
+    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+    // bricks
+    ctx.fillStyle='#94a3b8';
+    bricks.forEach(b=>{ if(!b.alive) return; ctx.fillRect(b.x,b.y,b.w,b.h); });
+  }
+
+  function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
+
+  // 操作（キーボード）
+  let keyL=false, keyR=false;
+  window.addEventListener('keydown', e=>{ if(e.key==='ArrowLeft') keyL=true; if(e.key==='ArrowRight') keyR=true; });
+  window.addEventListener('keyup', e=>{ if(e.key==='ArrowLeft') keyL=false; if(e.key==='ArrowRight') keyR=false; });
+  function tickKeys(dt){
+    let dir=0; if(keyL)dir-=1; if(keyR)dir+=1;
+    paddle.x += CFG.paddleSpeed*dt*dir;
+    paddle.x = clamp(paddle.x, paddle.w/2, canvas.width-paddle.w/2);
+  }
+
+  // 操作（タッチ/マウス）
+  function handlePointer(clientX){
+    const rect = canvas.getBoundingClientRect();
+    const x = (clientX-rect.left)*(canvas.width/rect.width);
+    paddle.x = clamp(x, paddle.w/2, canvas.width-paddle.w/2);
+  }
+  canvas.addEventListener('pointerdown', e=>handlePointer(e.clientX));
+  canvas.addEventListener('pointermove', e=>{ if(e.buttons) handlePointer(e.clientX); });
+
+  function collideRectCircle(rx,ry,rw, rh, cx,cy, cr){
+    const nx = clamp(cx, rx, rx+rw);
+    const ny = clamp(cy, ry, ry+rh);
+    const dx = cx-nx, dy = cy-ny;
+    return dx*dx+dy*dy <= cr*cr;
+  }
+  function reflectOnPaddle(){
+    const hit = (ball.x - paddle.x) / (paddle.w/2); // -1..1
+    const speed = Math.hypot(ball.vx, ball.vy);
+    const angle = (Math.PI*0.15) + (Math.PI*0.7)*(hit+1)/2; // ~27°..153°
+    ball.vx = Math.cos(angle)*speed;
+    ball.vy = -Math.abs(Math.sin(angle)*speed);
+  }
+
+  function loop(t){
+    if(!running){ lastT=t; requestAnimationFrame(loop); return; }
+    const dt = Math.min(32, t-lastT)/1000; lastT=t;
+    if(paused){ requestAnimationFrame(loop); return; }
+
+    tickKeys(dt);
+
+    ball.x += ball.vx*dt*speedMult;
+    ball.y += ball.vy*dt*speedMult;
+
+    if(ball.x-ball.r<0){ ball.x=ball.r; ball.vx*=-1; }
+    if(ball.x+ball.r>canvas.width){ ball.x=canvas.width-ball.r; ball.vx*=-1; }
+    if(ball.y-ball.r<0){ ball.y=ball.r; ball.vy*=-1; }
+
+    if(collideRectCircle(paddle.x-paddle.w/2, paddle.y-paddle.h/2, paddle.w, paddle.h, ball.x, ball.y, ball.r) && ball.vy>0){
+      reflectOnPaddle();
+    }
+
+    for(const b of bricks){
+      if(!b.alive) continue;
+      if(ball.x+ball.r < b.x || ball.x-ball.r > b.x+b.w || ball.y+ball.r < b.y || ball.y-ball.r > b.y+b.h) continue;
+      const prevX = ball.x - ball.vx*dt*speedMult;
+      const prevY = ball.y - ball.vy*dt*speedMult;
+      let hitX = false, hitY = false;
+      if(prevX+ball.r <= b.x || prevX-ball.r >= b.x+b.w) hitX = true;
+      if(prevY+ball.r <= b.y || prevY-ball.r >= b.y+b.h) hitY = true;
+      if(hitX) ball.vx*=-1;
+      if(hitY || (!hitX && !hitY)) ball.vy*=-1;
+      b.alive=false; bricksLeft--; score+=10;
+      scoreEl.textContent=score; leftEl.textContent=bricksLeft;
+      speedMult = Math.min( (1 + (CFG.growPerHit/100)*( (bricks.length - bricksLeft) )), CFG.maxSpeed/CFG.ballSpeed );
+      spdEl.textContent = (CFG.ballSpeed*speedMult/CFG.ballSpeed).toFixed(1)+'x';
+      break;
+    }
+
+    if(ball.y-ball.r > canvas.height){ end(false); return; }
+    if(bricksLeft===0){ end(true); return; }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function end(win){
+    running=false;
+    setOverlay(true, win?`コンプリート！ スコア: ${score}`:`ゲームオーバー！ スコア: ${score}`);
+  }
+  function start(){ reset(); running=true; paused=false; setOverlay(false); }
+  function pause(){ paused=!paused; document.getElementById('btnPause').textContent = paused?'▶︎ 再開':'⏸ 一時停止'; }
+
+  document.getElementById('btnStart').addEventListener('click', ()=>start());
+  document.getElementById('btnPause').addEventListener('click', ()=>{ if(running) pause(); });
+  document.getElementById('btnRetry').addEventListener('click', ()=>{ reset(); running=true; setOverlay(false); });
+  overlay.addEventListener('click', ()=>start());        // オーバーレイをタップでも開始
+  document.getElementById('stage').addEventListener('click', e=>{ // 予備：ステージタップでも
+    if(!running && !paused) start();
+  }, { once:false });
+
+  reset();
+  setOverlay(true,'タップでスタート');
+  requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
