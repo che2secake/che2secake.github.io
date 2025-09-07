@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>格言収納BOX | rememberbox.html</title>
+  <style>
+    :root{
+      --bg:#0b1023; --panel:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3b8;
+      --book:#60a5fa; /* 書籍 */
+      --paper:#34d399; /* 新聞 */
+      --news:#fbbf24; /* ニュース */
+      --other:#a78bfa; /* その他 */
+      --accent:#22d3ee;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1200px 800px at 10% -10%, rgba(34,211,238,.10), transparent 40%),radial-gradient(1000px 600px at 100% 0, rgba(167,139,250,.10), transparent 40%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif}
+    header{position:sticky;top:0;z-index:10;background:linear-gradient(180deg,rgba(11,23,42,.95),rgba(11,23,42,.6) 60%,rgba(11,23,42,0));backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.06)}
+    header .wrap{max-width:920px;margin:0 auto;padding:14px 16px}
+    h1{margin:0;font-size:clamp(20px,3.5vw,26px)}
+    .sub{color:var(--muted);font-size:12px}
+    main{max-width:920px;margin:0 auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    .form{padding:12px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
+    @media (max-width:560px){ .row{flex-wrap:nowrap} }
+    .row > *{flex:0 0 auto}
+    input[type="date"], select, textarea{background:#0b1220;color:var(--text);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px 12px}
+    input[type="date"]{width:150px}
+    select{width:160px}
+    textarea{width:100%;min-height:80px;resize:vertical}
+    .btn{appearance:none;border:1px solid rgba(255,255,255,.2);background:#0d1b2a;color:var(--text);padding:10px 12px;border-radius:10px;cursor:pointer}
+    .btn:hover{background:#12233b}
+    .btn:active{transform:translateY(1px)}
+    .list{display:flex;flex-direction:column;gap:10px;padding:12px}
+    .item{padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:grid;grid-template-columns:auto 1fr auto;gap:10px}
+    .date{color:var(--muted);font-size:12px}
+    .genre{font-weight:700}
+    .text{white-space:pre-wrap;line-height:1.6}
+    .actions{display:flex;gap:6px}
+    .chip{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06)}
+    .empty{color:var(--muted);padding:14px}
+    .hint{color:var(--muted);font-size:12px;padding:0 12px 12px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>格言収納BOX <span class="sub">— 覚えておきたい言葉を日付・ジャンル付きで記録</span></h1>
+    </div>
+  </header>
+
+  <main>
+    <!-- 入力フォーム（左→右に「日付」「ジャンル」「内容」、下に登録ボタン） -->
+    <section class="card form">
+      <div class="row" style="margin-bottom:8px">
+        <input id="fDate" type="date" />
+        <select id="fGenre" aria-label="ジャンル">
+          <option value="書籍">書籍</option>
+          <option value="新聞">新聞</option>
+          <option value="ニュース">ニュース</option>
+          <option value="その他">その他</option>
+        </select>
+        <textarea id="fText" placeholder="覚えておきたいフレーズ・考え方・引用など（複数行OK）"></textarea>
+        <button id="btnAdd" class="btn">＋ 追加</button>
+      </div>
+      <div class="hint">※ 左から右に「日付 → ジャンル → 内容」。上から下にスクロールして使います。</div>
+    </section>
+
+    <!-- 一覧 -->
+    <section class="card">
+      <div class="list" id="list"></div>
+    </section>
+  </main>
+
+  <script>
+    // ====== ユーティリティ ======
+    const $ = s => document.querySelector(s);
+    const fmt = (d)=>{
+      const t = new Date(d);
+      const y=t.getFullYear(), m=String(t.getMonth()+1).padStart(2,'0'), da=String(t.getDate()).padStart(2,'0');
+      return `${y}-${m}-${da}`;
+    };
+    const GENRE_COLOR = {
+      "書籍":"var(--book)",
+      "新聞":"var(--paper)",
+      "ニュース":"var(--news)",
+      "その他":"var(--other)"
+    };
+
+    // ====== 保存（localStorage） ======
+    const KEY = "rememberbox.entries.v1";
+    function load(){ try{ return JSON.parse(localStorage.getItem(KEY)||"[]"); }catch(e){ return []; } }
+    function save(arr){ localStorage.setItem(KEY, JSON.stringify(arr)); }
+
+    // ====== 状態 ======
+    let items = load(); // {id,date,genre,text,createdAt}
+
+    // ====== 初期化 ======
+    $('#fDate').value = fmt(new Date());
+    $('#fText').value = "";
+
+    // ====== 追加処理 ======
+    function addItem(){
+      const date = $('#fDate').value || fmt(new Date());
+      const genre = $('#fGenre').value;
+      const text = $('#fText').value.trim();
+      if(!text){ $('#fText').focus(); return; }
+      const id = Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+      items.push({ id, date, genre, text, createdAt: Date.now() });
+      save(items);
+      $('#fText').value = "";
+      render();
+      // スクロールはそのまま（上から下へ積む）
+    }
+
+    // ====== 削除 ======
+    function removeItem(id){
+      items = items.filter(x=>x.id!==id);
+      save(items);
+      render();
+    }
+
+    // ====== レンダリング ======
+    function render(){
+      const wrap = $('#list');
+      wrap.innerHTML = "";
+      if(items.length===0){
+        const empty = document.createElement('div');
+        empty.className = "empty";
+        empty.textContent = "まだ記録がありません。上のフォームから追加してください。";
+        wrap.appendChild(empty);
+        return;
+      }
+      // 追加順（上→下）で表示。最新をいちばん下に積む仕様。
+      items.forEach(it=>{
+        const row = document.createElement('div');
+        row.className = "item";
+        const genreColor = GENRE_COLOR[it.genre] || "var(--other)";
+        row.innerHTML = `
+          <div class="genre" style="color:${genreColor}">${it.genre}</div>
+          <div class="text">${escapeHtml(it.text)}</div>
+          <div class="actions">
+            <button class="btn" data-id="${it.id}" title="削除">✕</button>
+          </div>
+          <div class="date">📅 ${it.date}</div>
+          <div></div>
+          <div></div>
+        `;
+        row.querySelector('button').onclick = ()=> removeItem(it.id);
+        wrap.appendChild(row);
+      });
+    }
+
+    function escapeHtml(s){
+      return s.replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // ====== イベント ======
+    $('#btnAdd').addEventListener('click', addItem);
+    $('#fText').addEventListener('keydown', (e)=>{
+      if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ addItem(); }
+    });
+
+    // 初回描画
+    render();
+  </script>
+</body>
+</html>
