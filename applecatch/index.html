@@ -64,17 +64,17 @@ const CFG = {
   basketH: 36,
   basketSpeed: 900,
 
-  appleR: 19,             // 通常リンゴの半径
+  appleR: 19,             // 通常リンゴの半径（1.2倍）
   baseFall: 260,
   levelFallAdd: 70,
 
-  spawnEveryMs: 450,      // 基本間隔
+  spawnEveryMs: 450,      // 平均スポーン間隔（レベルで短縮）
   levelUpEvery: 10,
 
   goldenChance: 0.15,
   scoreNormal: 1,
   scoreGolden: 5,
-  scoreSpecial: 10        // 特大リンゴのスコア倍率
+  scoreSpecial: 10        // 特大リンゴのスコア
 };
 
 /* ====== 要素 ====== */
@@ -103,27 +103,33 @@ let score = 0, caught = 0, level = 0;
 let basket;
 let apples = []; // {x,y,r,vy,golden,special}
 let spawnTimer = 0, nextSpawn = 0;
+let keyL=false, keyR=false; // ← 入力フラグをグローバルで持ち、start()で毎回リセット
 
 /* ====== 初期化 ====== */
 function reset(){
-  score = 0; caught = 0; level = 0; apples.length = 0; spawnTimer = 0;
+  // すべての状態を初期化（何度呼んでも安全）
+  score = 0; caught = 0; level = 0;
+  apples.length = 0;
+  spawnTimer = 0; nextSpawn = 0;
+  keyL = keyR = false; // ← 押しっぱなし状態が残っていてもクリア
+
   const bottom = Math.max(60, canvas.height * 0.08);
   basket = { x: canvas.width/2, y: canvas.height - bottom, w: CFG.basketW, h: CFG.basketH };
+
   nextSpawn = pickNextSpawn();
   updateHUD();
 }
 
-/* ====== スポーン ====== */
+/* ====== スポーン（テンポよく1個ずつ） ====== */
 function pickNextSpawn(){
   const base = Math.max(180, CFG.spawnEveryMs - level*40);
   return base * (0.85 + Math.random() * 0.40);
 }
-
 function spawnOneApple(){
   let r = CFG.appleR;
   let special = false;
 
-  // 100個に1個特大リンゴ
+  // 100個に1個の確率で特大リンゴ（直径2.5倍）
   if (Math.random() < 0.01) {
     r = CFG.appleR * 2.5;
     special = true;
@@ -131,7 +137,7 @@ function spawnOneApple(){
 
   const margin = r + 8;
   const x = Math.random() * (canvas.width - margin*2) + margin;
-  const golden = !special && Math.random() < CFG.goldenChance;
+  const golden = !special && Math.random() < CFG.goldenChance; // 特大はゴールド化しない
   const vy = (CFG.baseFall + level * CFG.levelFallAdd) * (golden ? 0.95 : 1);
 
   apples.push({ x, y: -r, r, vy, golden, special });
@@ -141,7 +147,6 @@ function spawnOneApple(){
 function updateHUD(){ scoreEl.textContent = score; }
 
 /* ====== 入力 ====== */
-let keyL=false, keyR=false;
 addEventListener('keydown', e=>{
   if(e.key==='ArrowLeft') keyL = true;
   if(e.key==='ArrowRight') keyR = true;
@@ -178,6 +183,7 @@ function drawBasket(){
   ctx.fillStyle = shade;
   ctx.fillRect(x-w/2, y-h/2, w, 3);
 
+  // メッシュ
   ctx.save();
   ctx.strokeStyle = 'rgba(90,60,30,0.38)';
   ctx.lineWidth = 1;
@@ -196,7 +202,6 @@ function drawBasket(){
   }
   ctx.restore();
 }
-
 function drawApple(a){
   ctx.fillStyle = a.golden ? 'var(--gold)' : '#ff3b3b';
   ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI*2); ctx.fill();
@@ -221,9 +226,11 @@ function loop(t){
   if(!running){ lastT=t; requestAnimationFrame(loop); return; }
   const dt = Math.min(32, t - lastT) / 1000; lastT = t;
 
+  // 移動
   const dx = (keyR - keyL) * CFG.basketSpeed * dt;
   basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, basket.x + dx));
 
+  // スポーン（テンポよく1個ずつ）
   spawnTimer += dt*1000;
   if(spawnTimer >= nextSpawn){
     spawnTimer = 0;
@@ -231,13 +238,15 @@ function loop(t){
     nextSpawn = pickNextSpawn();
   }
 
+  // 進行
   for(let i=apples.length-1;i>=0;i--){
     const a = apples[i];
     a.y += a.vy * dt;
 
+    // キャッチ
     if(circleRectHit(a.x,a.y,a.r,basket.x-basket.w/2,basket.y-basket.h/2-6,basket.w,basket.h+14)){
       if(a.special){
-        score += CFG.scoreSpecial;  // 特大リンゴは10点
+        score += CFG.scoreSpecial;
       }else{
         score += a.golden ? CFG.scoreGolden : CFG.scoreNormal;
       }
@@ -248,23 +257,34 @@ function loop(t){
       continue;
     }
 
+    // 取り逃し → 終了
     if(a.y - a.r > canvas.height){
       end(false);
       return;
     }
   }
 
+  // 描画
   ctx.clearRect(0,0,canvas.width,canvas.height);
   apples.forEach(drawApple);
   drawBasket();
+
   requestAnimationFrame(loop);
 }
 
 /* ====== 制御 ====== */
-function start(){ fitCanvas(); reset(); running = true; setOverlay(false,'','',false); }
+function start(){
+  // 何度押しても安全に “完全初期化 → 開始”
+  fitCanvas();
+  reset();
+  running = true;
+  setOverlay(false,'','',false);
+}
 function end(win){
   running = false;
+  // ボタンラベルを RESTART にして明確化
   setOverlay(true, win?'CLEAR!':'GAME OVER!', `SCORE: ${score} — RESTARTで再挑戦`, true);
+  startBtn.textContent = 'RESTART';
 }
 function setOverlay(show, titleText, subText, showBtn=true){
   if(titleText!==undefined && titleText!=='') titleEl.textContent = titleText;
@@ -274,10 +294,18 @@ function setOverlay(show, titleText, subText, showBtn=true){
   if (show) overlay.focus();
 }
 
-/* ====== 開始トリガー ====== */
-startBtn.addEventListener('click', ()=>{ if(!running) start(); });
-overlay.addEventListener('click',   ()=>{ if(!running) start(); });
-stage  .addEventListener('click',   ()=>{ if(!running) start(); });
+/* ====== 開始トリガー（iPhoneでも確実に） ====== */
+function startSafe(e){
+  if(e){ e.preventDefault?.(); e.stopPropagation?.(); }
+  start();
+}
+startBtn.addEventListener('pointerdown', startSafe, {passive:false});
+startBtn.addEventListener('touchstart', startSafe, {passive:false});
+startBtn.addEventListener('click', startSafe);
+overlay.addEventListener('pointerdown', startSafe, {passive:false});
+overlay.addEventListener('touchstart', startSafe, {passive:false});
+overlay.addEventListener('click', startSafe);
+// ※ 誤タップ開始を防ぐため stage クリック開始は“しない”
 
 /* 初期表示 */
 fitCanvas();
