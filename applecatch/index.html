@@ -50,22 +50,18 @@
   </main>
 
 <script>
-/* ====== 設定（ご要望反映版） ====== */
+/* ====== 設定 ====== */
 const CFG = {
-  // カゴ：高さ2倍・茶色メッシュ表現
   basketW: 140,
-  basketH: 36,             // ← 18 → 36（2倍）
+  basketH: 36,
   basketSpeed: 900,
 
-  // リンゴ：サイズ1.2倍・赤／金
-  appleR: 19,              // ← 16 * 1.2 ≒ 19
+  appleR: 19,             // 1.2倍サイズ
   baseFall: 260,
   levelFallAdd: 70,
 
-  // スポーン：ランダム間隔 & おおよそ2倍ペース
-  spawnEveryMs: 450,       // ← 900 の半分（平均出現間隔）
+  spawnEveryMs: 450,      // 平均間隔（ここからレベルで短縮）
   levelUpEvery: 10,
-  maxConcurrent: 8,        // ← 4 → 8（同時数の上限を倍増）
 
   goldenChance: 0.15,
   scoreNormal: 1,
@@ -104,28 +100,22 @@ function reset(){
   score = 0; caught = 0; level = 0; apples.length = 0; spawnTimer = 0;
   const bottom = Math.max(60, canvas.height * 0.08);
   basket = { x: canvas.width/2, y: canvas.height - bottom, w: CFG.basketW, h: CFG.basketH };
-  nextSpawn = pickNextSpawn();                // ランダムな次出現時刻をセット
+  nextSpawn = pickNextSpawn();
   updateHUD();
 }
 
-/* ====== スポーン（ランダム間隔 & 同時数増加） ====== */
+/* ====== スポーン（テンポよく1個ずつ） ====== */
 function pickNextSpawn(){
-  // レベルが上がるほど早く、かつランダム（0.6〜1.4倍）
-  const base = Math.max(200, CFG.spawnEveryMs - level*50);
-  return base * (0.6 + Math.random()*0.8);
+  const base = Math.max(180, CFG.spawnEveryMs - level*40);
+  return base * (0.85 + Math.random() * 0.40);  // ランダム揺らぎ
 }
-function spawnApple(){
-  // 目標同時数：レベルに応じて増やし、従来比ほぼ2倍
-  const want = Math.min(2 + Math.floor(level/1), CFG.maxConcurrent);
-  const need = Math.max(0, want - apples.length);
-  for(let i=0;i<need;i++){
-    const r = CFG.appleR;
-    const margin = r + 8;
-    const x = Math.random() * (canvas.width - margin*2) + margin;
-    const golden = Math.random() < CFG.goldenChance;
-    const vy = (CFG.baseFall + level * CFG.levelFallAdd) * (golden ? 0.95 : 1);
-    apples.push({ x, y: -r, r, vy, golden });
-  }
+function spawnOneApple(){
+  const r = CFG.appleR;
+  const margin = r + 8;
+  const x = Math.random() * (canvas.width - margin*2) + margin;
+  const golden = Math.random() < CFG.goldenChance;
+  const vy = (CFG.baseFall + level * CFG.levelFallAdd) * (golden ? 0.95 : 1);
+  apples.push({ x, y: -r, r, vy, golden });
 }
 
 /* ====== HUD ====== */
@@ -161,32 +151,25 @@ function circleRectHit(cx, cy, cr, rx, ry, rw, rh){
 /* ====== 描画 ====== */
 function drawBasket(){
   const {x,y,w,h} = basket;
-  // カゴ色（薄い茶色系）
-  const main = '#cfa97a';           // 本体
-  const shade = '#b78e5c';          // 影
-  // 半円（取っ手）
+  const main = '#cfa97a', shade = '#b78e5c';
   ctx.fillStyle = 'rgba(207,169,122,0.18)';
   ctx.beginPath(); ctx.arc(x, y, w*0.62, Math.PI, 0); ctx.fill();
-  // 本体
   ctx.fillStyle = main;
   ctx.fillRect(x-w/2, y-h/2, w, h);
-  // 影
   ctx.fillStyle = shade;
   ctx.fillRect(x-w/2, y-h/2, w, 3);
 
-  // メッシュ（斜め格子）
+  // メッシュ
   ctx.save();
   ctx.strokeStyle = 'rgba(90,60,30,0.38)';
   ctx.lineWidth = 1;
   const left = x-w/2, top = y-h/2, right = x+w/2, bottom = y+h/2;
-  // 斜め左上→右下
   for(let d=-w; d<=w; d+=10){
     ctx.beginPath();
     ctx.moveTo(left + d, top);
     ctx.lineTo(left + d + h, bottom);
     ctx.stroke();
   }
-  // 斜め右上→左下
   for(let d=-w; d<=w; d+=10){
     ctx.beginPath();
     ctx.moveTo(right - d, top);
@@ -196,13 +179,10 @@ function drawBasket(){
   ctx.restore();
 }
 function drawApple(a){
-  // 赤リンゴ / 金リンゴ
   ctx.fillStyle = a.golden ? 'var(--gold)' : '#ff3b3b';
   ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI*2); ctx.fill();
-  // ヘタ
   ctx.strokeStyle = '#14532d'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(a.x, a.y - a.r + 4); ctx.lineTo(a.x, a.y - a.r - 6); ctx.stroke();
-  // きらり（ゴールドのみ）
   if(a.golden){
     ctx.strokeStyle = 'rgba(255,255,255,.85)';
     ctx.beginPath(); ctx.moveTo(a.x-6, a.y-3); ctx.lineTo(a.x-1, a.y-8);
@@ -215,50 +195,41 @@ function loop(t){
   if(!running){ lastT=t; requestAnimationFrame(loop); return; }
   const dt = Math.min(32, t - lastT) / 1000; lastT = t;
 
-  // キーボード移動
+  // 移動
   const dx = (keyR - keyL) * CFG.basketSpeed * dt;
   basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, basket.x + dx));
 
-  // スポーン（ランダム間隔）
+  // スポーン
   spawnTimer += dt*1000;
   if(spawnTimer >= nextSpawn){
     spawnTimer = 0;
-    spawnApple();
+    spawnOneApple();
     nextSpawn = pickNextSpawn();
   }
 
-  // 進行
+  // リンゴ更新
   for(let i=apples.length-1;i>=0;i--){
     const a = apples[i];
     a.y += a.vy * dt;
 
-    // キャッチ
-    const caughtNow = circleRectHit(
-      a.x, a.y, a.r,
-      basket.x - basket.w/2, basket.y - basket.h/2 - 6,
-      basket.w, basket.h + 14
-    );
-    if(caughtNow){
+    if(circleRectHit(a.x,a.y,a.r,basket.x-basket.w/2,basket.y-basket.h/2-6,basket.w,basket.h+14)){
       score += a.golden ? CFG.scoreGolden : CFG.scoreNormal;
-      caught += 1;
+      caught++;
       apples.splice(i,1);
       updateHUD();
-      if(caught > 0 && caught % CFG.levelUpEvery === 0){ level += 1; }
+      if(caught>0 && caught % CFG.levelUpEvery===0) level++;
       continue;
     }
 
-    // 取り逃し → 終了
     if(a.y - a.r > canvas.height){
       end(false);
       return;
     }
   }
 
-  // 描画
   ctx.clearRect(0,0,canvas.width,canvas.height);
   apples.forEach(drawApple);
   drawBasket();
-
   requestAnimationFrame(loop);
 }
 
