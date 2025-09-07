@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af;
-    --accent:#22d3ee; --good:#ef4444; --gold:#fbbf24; --basket:#22d3ee;
+    --gold:#fbbf24;
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
@@ -50,17 +50,24 @@
   </main>
 
 <script>
-/* ====== 設定 ====== */
+/* ====== 設定（ご要望反映版） ====== */
 const CFG = {
-  // 画面・バスケット
-  basketW: 140, basketH: 18, basketSpeed: 900,
-  // リンゴ
-  baseFall: 260,               // 初期落下速度(px/s)
-  levelFallAdd: 70,            // レベルアップ時の追加速度
-  spawnEveryMs: 900,           // 基本スポーン間隔
-  levelUpEvery: 10,            // 10個キャッチごとにレベルアップ
-  maxConcurrent: 4,            // 同時落下の最大数
-  goldenChance: 0.15,          // ゴールデン出現確率
+  // カゴ：高さ2倍・茶色メッシュ表現
+  basketW: 140,
+  basketH: 36,             // ← 18 → 36（2倍）
+  basketSpeed: 900,
+
+  // リンゴ：サイズ1.2倍・赤／金
+  appleR: 19,              // ← 16 * 1.2 ≒ 19
+  baseFall: 260,
+  levelFallAdd: 70,
+
+  // スポーン：ランダム間隔 & おおよそ2倍ペース
+  spawnEveryMs: 450,       // ← 900 の半分（平均出現間隔）
+  levelUpEvery: 10,
+  maxConcurrent: 8,        // ← 4 → 8（同時数の上限を倍増）
+
+  goldenChance: 0.15,
   scoreNormal: 1,
   scoreGolden: 5
 };
@@ -73,45 +80,50 @@ const stage = $('#stage');
 const overlay = $('#overlay'), titleEl = $('#title'), subEl = $('#sub'), startBtn = $('#btnStart');
 const scoreEl = $('#score');
 
-/* ====== レイアウト（レスポンシブ＆1画面完結） ====== */
+/* ====== レイアウト ====== */
 function fitCanvas(){
   const rect = stage.getBoundingClientRect();
   canvas.width  = Math.max(320, Math.floor(rect.width));
   canvas.height = Math.max(420, Math.floor(rect.height));
-  // バスケットのY位置再計算（見切れ防止）
   if (basket) {
     const bottom = Math.max(60, canvas.height * 0.08);
     basket.y = canvas.height - bottom;
   }
 }
-addEventListener('resize', fitCanvas);
+addEventListener('resize', fitCanvas, {passive:true});
 
 /* ====== 状態 ====== */
 let running = false, lastT = 0;
 let score = 0, caught = 0, level = 0;
 let basket;
 let apples = []; // {x,y,r,vy,golden}
-let spawnTimer = 0;
+let spawnTimer = 0, nextSpawn = 0;
 
 /* ====== 初期化 / リセット ====== */
 function reset(){
   score = 0; caught = 0; level = 0; apples.length = 0; spawnTimer = 0;
   const bottom = Math.max(60, canvas.height * 0.08);
   basket = { x: canvas.width/2, y: canvas.height - bottom, w: CFG.basketW, h: CFG.basketH };
+  nextSpawn = pickNextSpawn();                // ランダムな次出現時刻をセット
   updateHUD();
 }
 
-/* ====== スポーン ====== */
+/* ====== スポーン（ランダム間隔 & 同時数増加） ====== */
+function pickNextSpawn(){
+  // レベルが上がるほど早く、かつランダム（0.6〜1.4倍）
+  const base = Math.max(200, CFG.spawnEveryMs - level*50);
+  return base * (0.6 + Math.random()*0.8);
+}
 function spawnApple(){
-  // 同時数をレベルで増やす（最大 maxConcurrent）
-  const want = Math.min(1 + Math.floor(level/1), CFG.maxConcurrent);
+  // 目標同時数：レベルに応じて増やし、従来比ほぼ2倍
+  const want = Math.min(2 + Math.floor(level/1), CFG.maxConcurrent);
   const need = Math.max(0, want - apples.length);
   for(let i=0;i<need;i++){
-    const r = 16; // リンゴ半径（見やすい大きさ固定）
+    const r = CFG.appleR;
     const margin = r + 8;
     const x = Math.random() * (canvas.width - margin*2) + margin;
     const golden = Math.random() < CFG.goldenChance;
-    const vy = (CFG.baseFall + level * CFG.levelFallAdd) * (golden ? 0.95 : 1); // 金リンゴはわずかに遅め
+    const vy = (CFG.baseFall + level * CFG.levelFallAdd) * (golden ? 0.95 : 1);
     apples.push({ x, y: -r, r, vy, golden });
   }
 }
@@ -130,7 +142,6 @@ addEventListener('keyup', e=>{
   if(e.key==='ArrowLeft') keyL = false;
   if(e.key==='ArrowRight') keyR = false;
 });
-
 function handlePointer(clientX){
   const rect = canvas.getBoundingClientRect();
   const x = (clientX - rect.left) * (canvas.width / rect.width);
@@ -139,7 +150,7 @@ function handlePointer(clientX){
 canvas.addEventListener('pointerdown', e=>handlePointer(e.clientX));
 canvas.addEventListener('pointermove', e=>{ if(e.buttons) handlePointer(e.clientX); });
 
-/* ====== ユーティリティ ====== */
+/* ====== 当たり判定 ====== */
 function circleRectHit(cx, cy, cr, rx, ry, rw, rh){
   const nx = Math.max(rx, Math.min(cx, rx+rw));
   const ny = Math.max(ry, Math.min(cy, ry+rh));
@@ -150,24 +161,52 @@ function circleRectHit(cx, cy, cr, rx, ry, rw, rh){
 /* ====== 描画 ====== */
 function drawBasket(){
   const {x,y,w,h} = basket;
-  // 取っ手風の半円カゴ（シンプル）
-  ctx.fillStyle = 'rgba(34,211,238,0.15)';
-  ctx.beginPath(); ctx.arc(x, y, w*0.55, Math.PI, 0); ctx.fill();
+  // カゴ色（薄い茶色系）
+  const main = '#cfa97a';           // 本体
+  const shade = '#b78e5c';          // 影
+  // 半円（取っ手）
+  ctx.fillStyle = 'rgba(207,169,122,0.18)';
+  ctx.beginPath(); ctx.arc(x, y, w*0.62, Math.PI, 0); ctx.fill();
   // 本体
-  ctx.fillStyle = 'rgba(34,211,238,0.95)';
+  ctx.fillStyle = main;
   ctx.fillRect(x-w/2, y-h/2, w, h);
+  // 影
+  ctx.fillStyle = shade;
+  ctx.fillRect(x-w/2, y-h/2, w, 3);
+
+  // メッシュ（斜め格子）
+  ctx.save();
+  ctx.strokeStyle = 'rgba(90,60,30,0.38)';
+  ctx.lineWidth = 1;
+  const left = x-w/2, top = y-h/2, right = x+w/2, bottom = y+h/2;
+  // 斜め左上→右下
+  for(let d=-w; d<=w; d+=10){
+    ctx.beginPath();
+    ctx.moveTo(left + d, top);
+    ctx.lineTo(left + d + h, bottom);
+    ctx.stroke();
+  }
+  // 斜め右上→左下
+  for(let d=-w; d<=w; d+=10){
+    ctx.beginPath();
+    ctx.moveTo(right - d, top);
+    ctx.lineTo(right - d - h, bottom);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 function drawApple(a){
-  // 本体
-  ctx.fillStyle = a.golden ? 'var(--gold)' : 'var(--good)';
+  // 赤リンゴ / 金リンゴ
+  ctx.fillStyle = a.golden ? 'var(--gold)' : '#ff3b3b';
   ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI*2); ctx.fill();
   // ヘタ
   ctx.strokeStyle = '#14532d'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(a.x, a.y - a.r + 4); ctx.lineTo(a.x, a.y - a.r - 6); ctx.stroke();
-  // きらり（ゴールド）
+  // きらり（ゴールドのみ）
   if(a.golden){
     ctx.strokeStyle = 'rgba(255,255,255,.85)';
-    ctx.beginPath(); ctx.moveTo(a.x-6, a.y-3); ctx.lineTo(a.x-1, a.y-8); ctx.moveTo(a.x+4, a.y+2); ctx.lineTo(a.x+8, a.y-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x-6, a.y-3); ctx.lineTo(a.x-1, a.y-8);
+    ctx.moveTo(a.x+4, a.y+2); ctx.lineTo(a.x+8, a.y-2); ctx.stroke();
   }
 }
 
@@ -176,35 +215,39 @@ function loop(t){
   if(!running){ lastT=t; requestAnimationFrame(loop); return; }
   const dt = Math.min(32, t - lastT) / 1000; lastT = t;
 
-  // 入力（キーボード）
+  // キーボード移動
   const dx = (keyR - keyL) * CFG.basketSpeed * dt;
   basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, basket.x + dx));
 
-  // スポーン
+  // スポーン（ランダム間隔）
   spawnTimer += dt*1000;
-  const interval = Math.max(320, CFG.spawnEveryMs - level*60); // レベルで短く
-  if(spawnTimer >= interval){ spawnTimer = 0; spawnApple(); }
+  if(spawnTimer >= nextSpawn){
+    spawnTimer = 0;
+    spawnApple();
+    nextSpawn = pickNextSpawn();
+  }
 
   // 進行
   for(let i=apples.length-1;i>=0;i--){
     const a = apples[i];
     a.y += a.vy * dt;
 
-    // キャッチ判定（バスケット矩形＋余白）
-    const caughtNow = circleRectHit(a.x, a.y, a.r,
-                     basket.x - basket.w/2, basket.y - basket.h/2 - 4,
-                     basket.w, basket.h + 10);
+    // キャッチ
+    const caughtNow = circleRectHit(
+      a.x, a.y, a.r,
+      basket.x - basket.w/2, basket.y - basket.h/2 - 6,
+      basket.w, basket.h + 14
+    );
     if(caughtNow){
       score += a.golden ? CFG.scoreGolden : CFG.scoreNormal;
       caught += 1;
       apples.splice(i,1);
       updateHUD();
-      // レベルアップ処理
       if(caught > 0 && caught % CFG.levelUpEvery === 0){ level += 1; }
       continue;
     }
 
-    // 取り逃し → ゲームオーバー
+    // 取り逃し → 終了
     if(a.y - a.r > canvas.height){
       end(false);
       return;
@@ -220,12 +263,7 @@ function loop(t){
 }
 
 /* ====== 制御 ====== */
-function start(){
-  fitCanvas();
-  reset();
-  running = true;
-  setOverlay(false, '', '', false);
-}
+function start(){ fitCanvas(); reset(); running = true; setOverlay(false,'','',false); }
 function end(win){
   running = false;
   setOverlay(true, win?'CLEAR!':'GAME OVER!', `SCORE: ${score} — RESTARTで再挑戦`, true);
@@ -238,7 +276,7 @@ function setOverlay(show, titleText, subText, showBtn=true){
   if (show) overlay.focus();
 }
 
-/* ====== 開始トリガー（複数） ====== */
+/* ====== 開始トリガー ====== */
 startBtn.addEventListener('click', ()=>{ if(!running) start(); });
 overlay.addEventListener('click',   ()=>{ if(!running) start(); });
 stage  .addEventListener('click',   ()=>{ if(!running) start(); });
@@ -250,4 +288,3 @@ requestAnimationFrame(loop);
 </script>
 </body>
 </html>
-
