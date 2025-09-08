@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>スターキャノン</title>
+<style>
+  :root{
+    --bg:#070b1a; --panel:#0b1220; --text:#e5e7eb; --muted:#9ca3af;
+    --skyTop:#0b1023; --skyBottom:#0b1633;
+    --star:#fcd34d;           /* 通常スター：やや温かい黄色 */
+    --starEdge:#7c5c0a;
+    --rainbowA:#a78bfa;       /* レインボースター（外縁のグラデは描画側で） */
+    --beam:#60a5fa;           /* ビーム色 */
+    --beamCore:#93c5fd;
+    --border:rgba(255,255,255,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{
+    height:100%; margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
+    overflow:hidden; touch-action:none;
+  }
+  header{
+    height:44px; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--panel);
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  h1{margin:0; font-size:16px; white-space:nowrap}
+  .score{
+    font-weight:800; background:rgba(255,255,255,.06); border:1px solid var(--border);
+    padding:4px 10px; border-radius:999px; font-variant-numeric:tabular-nums; font-size:13px;
+  }
+  main{
+    height:calc(100dvh - 44px); max-width:980px; margin:0 auto; padding:8px; display:flex; flex-direction:column;
+  }
+  .stage{
+    position:relative; flex:1; border:1px solid var(--border); border-radius:12px; overflow:hidden;
+    background:linear-gradient(180deg,var(--skyTop),var(--skyBottom));
+  }
+  canvas{width:100%; height:100%; display:block}
+
+  /* オーバーレイ（START/RESTART） */
+  .overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+  .overlay .plain{
+    pointer-events:auto; background:transparent; border:1px solid #fff; color:#fff;
+    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer; touch-action:manipulation;
+  }
+  .overlay.hidden{ display:none; }
+
+  /* 左上に MISS 表示 */
+  .hud{
+    position:absolute; left:8px; top:8px; color:var(--muted); font-size:12px; background:rgba(0,0,0,.25);
+    padding:3px 6px; border-radius:8px; border:1px solid var(--border)
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>スターキャノン</h1>
+    <div class="score">SCORE: <span id="score">0</span></div>
+  </header>
+
+  <main>
+    <section class="stage" id="stage">
+      <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
+
+      <div id="hud" class="hud">MISS: <span id="miss">0</span>/3</div>
+
+      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
+        <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
+      </div>
+    </section>
+  </main>
+
+<script>
+/* ======= 基本状態 ======= */
+let state='idle', starting=false, lastT=0;
+
+const stage   = document.getElementById('stage');
+const canvas  = document.getElementById('game');
+const ctx     = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const missEl  = document.getElementById('miss');
+const overlay = document.getElementById('overlay');
+const startBtn= document.getElementById('btnStart');
+
+/* ロジックはCSSピクセル、描画のみDPR対応 */
+let viewW=720, viewH=1080, dpr=1;
+function fitCanvas(){
+  const rect = stage.getBoundingClientRect();
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  canvas.width  = Math.max(360, Math.floor(rect.width  * dpr));
+  canvas.height = Math.max(480, Math.floor(rect.height * dpr));
+  canvas.style.width  = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  viewW = rect.width; viewH = rect.height;
+  onResize();
+}
+addEventListener('resize', fitCanvas, {passive:true});
+
+/* ======= スタート/リスタート ======= */
+function toPlaying(){
+  state='playing';
+  overlay.classList.add('hidden');
+  score=0; misses=0; elapsed=0; updateHUD();
+  stars.length=beams.length=particles.length=0;
+  spawnTimer=0; nextSpawn=pickNextSpawn();
+}
+function toGameOver(){
+  state='gameover';
+  overlay.classList.remove('hidden');
+  startBtn.textContent='RESTART';
+}
+function fullReset(){
+  state='idle'; starting=false; lastT=0;
+  fitCanvas();
+  initGameObjects();
+  startBtn.textContent='START';
+  overlay.classList.remove('hidden');
+  updateHUD();
+}
+function safeStart(){
+  if(starting || state==='playing') return;
+  starting = true;
+  fullReset(); toPlaying();
+  setTimeout(()=>{ starting=false; }, 120);
+}
+function onBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
+startBtn.addEventListener('click', onBtn);
+startBtn.addEventListener('pointerdown', onBtn);
+startBtn.addEventListener('touchstart', onBtn, {passive:false});
+canvas.addEventListener('pointerdown', e=>{ if(state!=='playing') onBtn(e); });
+
+/* ======= ゲーム設定 ======= */
+const CFG = {
+  // 星
+  starRMin: 10, starRMax: 16,       // 通常スター半径
+  rainbowChance: 0.07,              // レインボースター出現率
+  rainbowBonus: 5,                   // スコア倍率（通常×5）
+
+  // 落下速度（なめらか加速）
+  vyBaseMin: 80, vyBaseMax: 140,    // 初期落下速度
+  vyMaxBoost: 2.2,                  // 最大で +220% まで緩やか上昇
+  driftMax: 40,                      // 横揺れ
+
+  // スポーン間隔（短縮も緩やか）
+  spawnMin: 380, spawnMax: 1000,
+  spawnMinLimit: 240,
+
+  // ビーム
+  fireCooldownMs: 160,              // 連射間隔
+  beamLifeMs: 120,                  // ビームの可視時間
+  beamWidth: 6,
+
+  // ルール
+  maxMiss: 3,
+  scorePerStar: 10,
+
+  // エフェクト
+  particleN: 16
+};
+
+/* なめらか増加：0→1（指数緩和） */
+function smooth01(x, k=35){ return 1 - Math.exp(-x / k); }
+/* 経過時間ベースで速度倍率（時間が経つほど上昇） */
+function speedScaleByTime(sec){
+  // 例: 60秒で ~70% くらいまで上昇、長時間で上限に漸近
+  const t = smooth01(sec, 60);
+  return 1 + CFG.vyMaxBoost * t;
+}
+/* スポーン間隔の短縮も緩やかに */
+function spawnMillisByScore(score){
+  const t = smooth01(score, 50);
+  const min = Math.max(CFG.spawnMinLimit, CFG.spawnMin - 240*t);
+  const max = CFG.spawnMax - 260*t*0.7;
+  return {min, max:Math.max(min+80, max)};
+}
+
+/* ======= 変数 ======= */
+let score=0, misses=0, elapsed=0;
+let stars=[], beams=[], particles=[];
+let spawnTimer=0, nextSpawn=600;
+let lastFireAt = 0;
+
+/* ======= 初期化 ======= */
+function initGameObjects(){
+  score=0; misses=0; elapsed=0;
+  stars.length=beams.length=particles.length=0;
+  spawnTimer=0; nextSpawn=pickNextSpawn();
+}
+function onResize(){}
+
+/* ======= 便利関数 ======= */
+const rand=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function pickNextSpawn(){
+  const {min,max} = spawnMillisByScore(score);
+  return min + Math.random()*(max-min);
+}
+
+/* ======= スター生成 ======= */
+function spawnStar(){
+  const isRainbow = Math.random() < CFG.rainbowChance;
+  const r = isRainbow ? rand(CFG.starRMin+2, CFG.starRMax+3) : rand(CFG.starRMin, CFG.starRMax);
+  const x = rand(r+8, viewW - (r+8));
+  const vyScale = speedScaleByTime(elapsed);
+  const vy = rand(CFG.vyBaseMin, CFG.vyBaseMax) * vyScale;
+  const vx = rand(-CFG.driftMax, CFG.driftMax);
+  stars.push({x, y: -r-10, r, vx, vy, type: isRainbow?'rainbow':'normal', t:0});
+}
+
+/* ======= 射撃（タップでビーム） ======= */
+function canvasPos(e){
+  const rect = canvas.getBoundingClientRect();
+  return {x:(e.clientX-rect.left), y:(e.clientY-rect.top)};
+}
+canvas.addEventListener('pointerdown', e=>{
+  if(state!=='playing') return;
+  const now = performance.now();
+  if(now - lastFireAt < CFG.fireCooldownMs) return; // 連射クールダウン
+  lastFireAt = now;
+
+  const p = canvasPos(e);
+  const cx = viewW/2, cy = viewH-24; // 砲台位置（下中央）
+  // ビーム生成（可視短時間）
+  beams.push({ax:cx, ay:cy, bx:p.x, by:p.y, born:now});
+
+  // 当たり判定：線分 vs 円
+  for(let i=stars.length-1;i>=0;i--){
+    const s = stars[i];
+    if(segCircleHit(cx,cy,p.x,p.y, s.x,s.y, s.r)){
+      // 撃破
+      const bonus = (s.type==='rainbow') ? CFG.rainbowBonus : 1;
+      score += CFG.scorePerStar * bonus;
+      updateHUD();
+      spawnStarParticles(s);
+      stars.splice(i,1);
+    }
+  }
+});
+function segCircleHit(ax,ay,bx,by,cx,cy,r){
+  const abx=bx-ax, aby=by-ay;
+  const t = clamp(((cx-ax)*abx + (cy-ay)*aby) / (abx*abx+aby*aby||1), 0, 1);
+  const px=ax+abx*t, py=ay+aby*t;
+  const dx=cx-px, dy=cy-py;
+  return (dx*dx+dy*dy) <= r*r;
+}
+
+/* ======= パーティクル ======= */
+function spawnStarParticles(s){
+  const n = CFG.particleN;
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2, sp = rand(80,240);
+    particles.push({
+      x:s.x, y:s.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+      life: rand(280,520),
+      type: s.type
+    });
+  }
+}
+
+/* ======= 更新 ======= */
+function update(dt){
+  elapsed += dt;
+
+  // スポーン
+  spawnTimer += dt*1000;
+  if(spawnTimer>=nextSpawn){
+    spawnTimer=0; nextSpawn=pickNextSpawn(); spawnStar();
+  }
+
+  // 星の移動（時間でじわじわ速く）
+  const vyScale = speedScaleByTime(elapsed);
+  for(let i=stars.length-1;i>=0;i--){
+    const s = stars[i];
+    s.t += dt;
+    s.x += s.vx*dt;
+    s.y += s.vy*dt; // vy は spawn 時に倍率反映済み
+
+    // 端で軽く跳ね返し（画面外に出にくく）
+    if(s.x < s.r+6){ s.x=s.r+6; s.vx=Math.abs(s.vx)*0.85; }
+    if(s.x > viewW-(s.r+6)){ s.x=viewW-(s.r+6); s.vx=-Math.abs(s.vx)*0.85; }
+
+    // 下まで到達 → MISS
+    if(s.y - s.r > viewH){
+      misses++; updateHUD();
+      stars.splice(i,1);
+      if(misses>=CFG.maxMiss){ toGameOver(); }
+    }
+  }
+
+  // ビーム寿命
+  const now = performance.now();
+  for(let i=beams.length-1;i>=0;i--){
+    if(now - beams[i].born > CFG.beamLifeMs) beams.splice(i,1);
+  }
+
+  // パーティクル
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.vx *= 0.985; p.vy = (p.vy+600*dt) * 0.985;
+    p.x += p.vx*dt; p.y += p.vy*dt;
+    p.life -= dt*1000;
+    if(p.life<=0) particles.splice(i,1);
+  }
+}
+
+/* ======= 描画 ======= */
+function render(){
+  ctx.clearRect(0,0,viewW,viewH);
+
+  // 背景の星々（演出用：薄い点をランダム配置風に）
+  drawBackdropStars();
+
+  // 星
+  for(const s of stars) drawStar(s);
+
+  // ビーム
+  for(const b of beams) drawBeam(b);
+
+  // 砲台
+  drawCannon();
+
+  // パーティクル
+  for(const p of particles) drawParticle(p);
+}
+
+function drawBackdropStars(){
+  // 軽いノイズ的にチラチラ
+  const n = Math.floor(viewW*viewH/22000);
+  ctx.fillStyle = 'rgba(255,255,255,.15)';
+  for(let i=0;i<n;i++){
+    const x = (i*73 % viewW), y = (i*127 % viewH);
+    ctx.fillRect(x, y, 1, 1);
+  }
+}
+
+function drawStar(s){
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  // 光る外縁
+  const grad = ctx.createRadialGradient(0,0, s.r*0.2, 0,0, s.r*1.6);
+  if(s.type==='rainbow'){
+    grad.addColorStop(0, 'rgba(255,255,255,.95)');
+    grad.addColorStop(0.5, 'rgba(168,85,247,.35)'); // 紫
+    grad.addColorStop(1, 'rgba(34,211,238,.15)');   // 水色
+  }else{
+    grad.addColorStop(0, 'rgba(255,255,255,.9)');
+    grad.addColorStop(0.5, 'rgba(252,211,77,.35)');
+    grad.addColorStop(1, 'rgba(252,211,77,.12)');
+  }
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(0,0, s.r*1.4, 0, Math.PI*2); ctx.fill();
+
+  // 本体（星形）
+  drawStarShape(0,0, s.r, s.type==='rainbow');
+  ctx.restore();
+}
+function drawStarShape(x,y,r, rainbow){
+  ctx.save();
+  ctx.translate(x,y);
+  const spikes=5, outer=r, inner=r*0.5;
+  ctx.beginPath();
+  for(let i=0;i<spikes*2;i++){
+    const ang = (Math.PI/spikes)*i - Math.PI/2;
+    const rad = (i%2===0 ? outer : inner);
+    ctx.lineTo(Math.cos(ang)*rad, Math.sin(ang)*rad);
+  }
+  ctx.closePath();
+  if(rainbow){
+    ctx.fillStyle='#ffffff';
+    ctx.fill();
+    // 縁を虹っぽく
+    const grad = ctx.createLinearGradient(-outer, -outer, outer, outer);
+    grad.addColorStop(0,'#22d3ee'); // シアン
+    grad.addColorStop(0.5,'#a78bfa'); // パープル
+    grad.addColorStop(1,'#f472b6'); // ピンク
+    ctx.lineWidth = Math.max(1.6, r*0.18);
+    ctx.strokeStyle = grad;
+    ctx.stroke();
+  }else{
+    ctx.fillStyle = getVar('--star');
+    ctx.strokeStyle = getVar('--starEdge');
+    ctx.lineWidth = Math.max(1.4, r*0.16);
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawBeam(b){
+  // 外側（発光）
+  const grad = ctx.createLinearGradient(b.ax,b.ay,b.bx,b.by);
+  grad.addColorStop(0, 'rgba(147,197,253,.55)');
+  grad.addColorStop(1, 'rgba(96,165,250,.10)');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = CFG.beamWidth*1.8;
+  ctx.beginPath(); ctx.moveTo(b.ax,b.ay); ctx.lineTo(b.bx,b.by); ctx.stroke();
+
+  // コア
+  ctx.strokeStyle = getVar('--beam');
+  ctx.lineWidth = CFG.beamWidth;
+  ctx.beginPath(); ctx.moveTo(b.ax,b.ay); ctx.lineTo(b.bx,b.by); ctx.stroke();
+}
+
+function drawCannon(){
+  const cx=viewW/2, cy=viewH-10, w=56, h=16;
+  // 台座
+  ctx.fillStyle='rgba(255,255,255,.06)';
+  ctx.beginPath(); ctx.ellipse(cx, viewH-4, 40, 8, 0, 0, Math.PI*2); ctx.fill();
+
+  // 本体
+  ctx.fillStyle='rgba(255,255,255,.15)';
+  ctx.fillRect(cx-w/2, cy-h, w, h);
+  // 砲口
+  ctx.fillStyle='rgba(147,197,253,.6)';
+  ctx.fillRect(cx-4, cy-h-16, 8, 16);
+}
+
+function drawParticle(p){
+  const a = Math.max(0, Math.min(1, p.life/520));
+  ctx.fillStyle = (p.type==='rainbow') ? `rgba(167,139,250,${a})` : `rgba(252,211,77,${a})`;
+  ctx.beginPath(); ctx.arc(p.x,p.y,2.2,0,Math.PI*2); ctx.fill();
+}
+
+/* CSS var とりだし */
+function getVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+/* ======= HUD ======= */
+function updateHUD(){
+  scoreEl.textContent = String(score);
+  missEl.textContent  = String(misses);
+}
+
+/* ======= ループ ======= */
+function loop(t){
+  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
+  if(state==='playing'){ update(dt); }
+  render();
+  requestAnimationFrame(loop);
+}
+
+/* ======= 起動 ======= */
+function onResize(){}
+fullReset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
