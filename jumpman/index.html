@@ -3,127 +3,98 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>ジャンプマンゲーム</title>
+<title>サムライバナナ</title>
 <style>
   :root{
-    --bg:#f6f7fb; --panel:#ffffff; --text:#111827;
-    --fg:#000000;           /* 人（黒） */
-    --block:#000000;        /* ブロック（黒） */
-    --ground:#e5e7eb; --border:#e5e7eb;
-    --shadow:0 8px 24px rgba(0,0,0,.08);
-    --accent:#ef4444;       /* JUMPボタン赤 */
-    --footerH:86px;         /* フッター（JUMPバー）の高さ */
+    --bg:#f6f7fb; --panel:#ffffff; --text:#111827; --muted:#4b5563;
+    --banana:#facc15;      /* バナナ（黄） */
+    --bananaEdge:#a16207;  /* バナナ縁（濃い黄土） */
+    --slash:#ef4444;       /* 斬撃エフェクト（赤） */
+    --border:#e5e7eb; --shadow:0 8px 24px rgba(0,0,0,.08);
   }
   *{box-sizing:border-box}
   html,body{
     height:100%;margin:0;background:var(--bg);color:var(--text);
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
     overflow:hidden;
+    touch-action:none; /* スワイプでスクロールしない */
   }
   header{
     padding:10px 14px;border-bottom:1px solid var(--border);background:var(--panel);
     display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:var(--shadow)
   }
-  h1{margin:0;font-size:16px;white-space:nowrap}
+  h1{margin:0;font-size:18px;white-space:nowrap}
   .score{
-    font-weight:800;background:#f3f4f6;border:1px solid var(--border);
-    color:#111827;padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums
+    font-weight:800;background:#f3f4f6;border:1px solid var(--border);color:#111827;
+    padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums
   }
-
-  /* レイアウト：上がゲーム、下がフッター（JUMP） */
   main{
     height:calc(100dvh - 48px);
-    max-width:100vw; margin:0 auto; display:flex; flex-direction:column;
+    max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column
   }
   .stage{
-    position:relative; flex:1; display:flex; flex-direction:column;
-    border:1px solid var(--border); border-radius:12px; overflow:hidden;
-    margin:12px; margin-bottom:0; background:linear-gradient(180deg,#ffffff,#f6f7fb); box-shadow:var(--shadow);
+    position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;
+    background:linear-gradient(180deg,#ffffff,#f6f7fb);box-shadow:var(--shadow)
   }
-  .gamewrap{
-    position:relative; flex:1; /* ← キャンバス領域（フッターと分離） */
-  }
-  canvas{
-    width:100%; height:100%; display:block; touch-action:none;
-  }
+  canvas{width:100%;height:100%;display:block}
 
-  /* START/RESTART：無装飾ボタンのみ（キャンバス上、中央） */
+  /* START/RESTART：無装飾 */
   .overlay{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    pointer-events:none;
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none
   }
   .overlay .plain{
-    pointer-events:auto; background:transparent; border:1px solid #111; color:#111;
-    padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer;
+    pointer-events:auto;background:transparent;border:1px solid #111;color:#111;
+    padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer
   }
-  .overlay.hidden{ display:none; }
+  .overlay.hidden{display:none}
 
-  /* ★ 画面最下部のフッター（JUMPボタン置き場） */
-  .footer{
-    position:relative; height:var(--footerH);
-    padding:8px max(env(safe-area-inset-right),12px) calc(max(env(safe-area-inset-bottom),8px)) max(env(safe-area-inset-left),12px);
-    display:flex; align-items:center; justify-content:center; gap:12px;
-    background:var(--panel); border-top:1px solid var(--border);
-  }
-  .jumpbtn{
-    min-width:200px; width:min(56vw,520px);
-    padding:14px 18px; border-radius:14px;
-    appearance:none; border:2px solid #dc2626; background:var(--accent); color:#fff;
-    font-size:20px; font-weight:900; letter-spacing:.03em; box-shadow:0 8px 16px rgba(239,68,68,.25);
-    touch-action:manipulation;
-  }
-  .jumpbtn:active{ transform:translateY(1px); filter:brightness(.95); }
-
-  /* 横向き推奨の微調整（横ではヘッダ文字を少し小さく） */
-  @media (orientation:landscape){
-    h1{ font-size:15px; }
-    .jumpbtn{ width:min(40vw,520px); }
+  .hud{
+    position:absolute;left:10px;top:10px;color:var(--muted);font-size:12px;background:rgba(255,255,255,.6);
+    padding:4px 8px;border-radius:8px;border:1px solid var(--border)
   }
 </style>
 </head>
 <body>
   <header>
-    <h1>ジャンプマンゲーム（横向き推奨）</h1>
-    <div class="score">TIME: <span id="score">0.0</span>s</div>
+    <h1>サムライバナナ</h1>
+    <div class="score">SCORE: <span id="score">0</span></div>
   </header>
 
   <main>
     <section class="stage" id="stage">
-      <!-- キャンバス領域（JUMPボタンと分離） -->
-      <div class="gamewrap" id="gamewrap">
-        <canvas id="game" width="960" height="540" aria-label="ゲーム画面"></canvas>
+      <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
 
-        <!-- 無装飾のSTART/RESTART -->
-        <div id="overlay" class="overlay" role="dialog" aria-modal="true">
-          <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
-        </div>
-      </div>
+      <!--（任意）軽いHUD：ミス残回数 -->
+      <div id="hud" class="hud">MISS: <span id="miss">0</span>/3</div>
 
-      <!-- ★ 最下部フッター（ブロックが流れてこないエリア） -->
-      <div class="footer" id="footer">
-        <button id="jumpBtn" class="jumpbtn" type="button" aria-label="ジャンプ">JUMP!</button>
+      <!-- START/RESTART（無装飾） -->
+      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
+        <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
       </div>
     </section>
   </main>
 
 <script>
-/* ===== 状態管理 ===== */
-let state='idle', starting=false, lastT=0, playStartAt=0;
+/* ========= 画面/状態 ========= */
+let state='idle', starting=false, lastT=0;
 
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const stage = document.getElementById('stage');
-const gamewrap = document.getElementById('gamewrap');
-const footer = document.getElementById('footer');
+const stage   = document.getElementById('stage');
+const canvas  = document.getElementById('game');
+const ctx     = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
+const missEl  = document.getElementById('miss');
 const overlay = document.getElementById('overlay');
-const startBtn = document.getElementById('btnStart');
-const jumpBtn  = document.getElementById('jumpBtn');
+const startBtn= document.getElementById('btnStart');
 
 function fitCanvas(){
-  const rect = gamewrap.getBoundingClientRect();      // ← キャンバスは「フッター除外領域」にフィット
-  canvas.width  = Math.max(480, Math.floor(rect.width));
-  canvas.height = Math.max(270, Math.floor(rect.height));
+  // 高DPI対応でシャープに
+  const rect = stage.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  canvas.width  = Math.max(360, Math.floor(rect.width  * dpr));
+  canvas.height = Math.max(480, Math.floor(rect.height * dpr));
+  canvas.style.width  = rect.width+'px';
+  canvas.style.height = rect.height+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0); // 論理→CSS座標系に統一
   onResize();
 }
 addEventListener('resize', fitCanvas, {passive:true});
@@ -131,8 +102,9 @@ addEventListener('resize', fitCanvas, {passive:true});
 function toPlaying(){
   state='playing';
   overlay.classList.add('hidden');
-  keyJump=false; jumpPressed=false; jumpHeldMs=0;
-  playStartAt=performance.now(); // 時間スコア開始
+  score=0; misses=0; updateHUD();
+  slashTrail.length=0; recentSegments.length=0; lastCutAt=0; combo=0;
+  bananas.length=0; spawnTimer=0; nextSpawn=pickNextSpawn();
 }
 function toGameOver(){
   state='gameover';
@@ -141,12 +113,11 @@ function toGameOver(){
 }
 function fullReset(){
   state='idle'; starting=false; lastT=0;
-  keyJump=false; jumpPressed=false; jumpHeldMs=0;
   fitCanvas();
   initGameObjects();
-  updateHUD(0);
   startBtn.textContent='START';
   overlay.classList.remove('hidden');
+  updateHUD();
 }
 function safeStart(){
   if(starting||state==='playing') return;
@@ -158,199 +129,243 @@ startBtn.addEventListener('click', onBtn);
 startBtn.addEventListener('pointerdown', onBtn);
 startBtn.addEventListener('touchstart', onBtn, {passive:false});
 
-/* ===== ゲーム設定（横向き前提＋ズームアウト気味） ===== */
-const CFG={
-  groundHRatio:0.14,       // 地面薄め（視界広め）
-  grav:2000,
-  jumpBoostAcc:3600,
-  maxHoldMs:160,
-  jumpCooldownMs:90,
-  maxJumps:3,
-  initialVyGround:-540,
-  initialVyAir:-500,
-
-  player:{w:38,h:64},      // 横画面で少し小さめ
-  block:{w:38,h:56,speed:420,heightMaxScale:3.0},
-
-  spawnGapMin:560,         // 反応時間確保のため長め
-  spawnGapMax:1900,
-  spawnSpeedupPer100Sec:0.10,
-
-  extraSpawnOffsetMin:220, // 画面のさらに右外から出す
-  extraSpawnOffsetMax:300
+/* ========= ゲーム内容 ========= */
+const CFG = {
+  gravity: 1400,                 // 下向き加速度
+  spawnMin: 320, spawnMax: 900,  // 出現間隔(ms) ランダム
+  speedupSec: 90,                // 経過時間でスポーン短縮
+  radiusMin: 18, radiusMax: 26,  // バナナの基準半径（見た目は楕円）
+  maxMiss: 3,                    // ミス3回で終了
+  baseVy: 260,  vyRand: 180,     // 初速（下向き）
+  vxRand: 140,                   // 横ぶれ
+  spinMin: -3, spinMax: 3,       // 回転速度
+  comboWindow: 600,              // ms以内の連続切りでコンボ継続
+  scoreBase: 10,                 // 基本点
+  sliceWidth: 6,                 // 斬撃の見た目
+  trailFadeMs: 220,              // 斬撃の軌跡フェード
+  segmentKeepMs: 120,            // 判定に使う最近の線分保持時間
+  particleN: 12                  // 斬撃パーティクル数
 };
 
-let groundY=0, ceilingY=0;
-let player, blocks=[], spawnTimer=0, nextSpawn=0;
+let score=0, misses=0, elapsed=0;
+let bananas=[], spawnTimer=0, nextSpawn=600;
+let lastCutAt=0, combo=0;
 
-// 3段ジャンプ・可変ジャンプ
-let jumpsLeft=CFG.maxJumps, keyJump=false, jumpPressed=false, jumpHeldMs=0, lastJumpReleaseAt=0;
-
-function initGameObjects(){
-  groundY = Math.floor(canvas.height * (1 - CFG.groundHRatio));
-  ceilingY = Math.max(30, Math.floor(canvas.height * 0.12)); // 上に出ないよう制限
-  player = {
-    x: Math.floor(canvas.width * 0.12), // 横はさらに左寄せで先が見える
-    y: groundY - CFG.player.h,
-    vx: 0, vy: 0, w: CFG.player.w, h: CFG.player.h, onGround:true
-  };
-  jumpsLeft = CFG.maxJumps;
-  blocks.length = 0;
-  spawnTimer = 0;
-  nextSpawn = pickNextSpawn();
+// バナナ生成
+function pickNextSpawn(){
+  // 時間経過で少し短く（最短 220ms 程度）
+  const t = elapsed;
+  const factor = Math.max(0.5, 1 - t/CFG.speedupSec*0.3);
+  const min = CFG.spawnMin * factor;
+  const max = CFG.spawnMax * factor;
+  return min + Math.random()*(max-min);
+}
+function spawnBanana(){
+  const r = rand(CFG.radiusMin, CFG.radiusMax);
+  const x = rand(r+10, canvas.width/dpr - r-10);
+  const vy = CFG.baseVy + Math.random()*CFG.vyRand;
+  const vx = (Math.random()*2-1) * CFG.vxRand;
+  const spin = rand(CFG.spinMin, CFG.spinMax);
+  bananas.push({x,y:-r-10,r, vx,vy, spin, ang:rand(0,Math.PI*2), cut:false});
 }
 
-function onResize(){
-  groundY = Math.floor(canvas.height * (1 - CFG.groundHRatio));
-  ceilingY = Math.max(30, Math.floor(canvas.height * 0.12));
-  if(player){
-    const bottom = player.y + player.h;
-    const diff = groundY - bottom;
-    player.y += diff;
-    if(player.y + player.h >= groundY){
-      player.y = groundY - player.h; player.vy = 0; player.onGround = true; jumpsLeft = CFG.maxJumps;
+// ユーティリティ
+const dpr = Math.min(window.devicePixelRatio||1, 2);
+const rand=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+/* ========= 入力（スワイプ→線分） ========= */
+let pointerDown=false;
+let lastPt=null;
+let slashTrail=[];        // {x,y,t} 可視化用（短命）
+let recentSegments=[];    // {ax,ay,bx,by,t} 衝突判定用
+
+function canvasPos(e){
+  const rect=canvas.getBoundingClientRect();
+  const x=(e.clientX - rect.left);
+  const y=(e.clientY - rect.top);
+  return {x,y};
+}
+canvas.addEventListener('pointerdown',e=>{
+  if(state!=='playing'){ safeStart(); return; }
+  pointerDown=true; lastPt=canvasPos(e); slashTrail.push({x:lastPt.x,y:lastPt.y,t:performance.now()});
+});
+canvas.addEventListener('pointermove',e=>{
+  if(!pointerDown||state!=='playing') return;
+  const p=canvasPos(e); const now=performance.now();
+  // 可視化用の軌跡
+  slashTrail.push({x:p.x,y:p.y,t:now});
+  // 線分生成（前点→今点）
+  if(lastPt){
+    recentSegments.push({ax:lastPt.x,ay:lastPt.y,bx:p.x,by:p.y,t:now});
+    // バナナ当たり判定
+    slashCheck(lastPt.x,lastPt.y,p.x,p.y, now);
+  }
+  lastPt=p;
+});
+addEventListener('pointerup',()=>{ pointerDown=false; lastPt=null; });
+
+function slashCheck(ax,ay,bx,by, time){
+  // 線分 (a->b) と各バナナ（円形近似）距離で判定
+  for(const b of bananas){
+    if(b.cut) continue;
+    const dist = segCircleDist(ax,ay,bx,by, b.x,b.y,b.r*1.1);
+    if(dist<=0){ // 命中
+      b.cut=true;
+      // スコア & コンボ
+      if(time - lastCutAt <= CFG.comboWindow){ combo++; } else { combo=1; }
+      lastCutAt=time;
+      score += CFG.scoreBase * combo;
+      updateHUD();
+
+      // パーティクル & バナナ破片っぽい演出
+      spawnParticles(b.x,b.y,b.r);
+    }
+  }
+}
+function segCircleDist(ax,ay,bx,by, cx,cy,r){
+  const abx=bx-ax, aby=by-ay;
+  const t = clamp(((cx-ax)*abx + (cy-ay)*aby) / (abx*abx+aby*aby||1), 0, 1);
+  const px = ax + abx*t, py = ay + aby*t;
+  const dx = cx - px, dy = cy - py;
+  return Math.hypot(dx,dy) - r;
+}
+
+/* ========= パーティクル（斬撃演出） ========= */
+let particles=[]; // {x,y,vx,vy,life}
+function spawnParticles(x,y,r){
+  for(let i=0;i<CFG.particleN;i++){
+    const a=Math.random()*Math.PI*2;
+    const s=rand(120,320);
+    particles.push({x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, life: rand(220,420)});
+  }
+}
+
+/* ========= 初期化 ========= */
+function initGameObjects(){
+  score=0; misses=0; elapsed=0;
+  bananas.length=0; particles.length=0;
+  recentSegments.length=0; slashTrail.length=0;
+  spawnTimer=0; nextSpawn=pickNextSpawn();
+}
+
+/* ========= 更新 ========= */
+function update(dt){
+  elapsed += dt;
+
+  // スポーン
+  spawnTimer += dt*1000;
+  if(spawnTimer>=nextSpawn){
+    spawnTimer=0; nextSpawn=pickNextSpawn(); spawnBanana();
+  }
+
+  // バナナ移動/判定
+  for(let i=bananas.length-1;i>=0;i--){
+    const b=bananas[i];
+    b.vy += CFG.gravity*dt;
+    b.x  += b.vx*dt;
+    b.y  += b.vy*dt;
+    b.ang+= b.spin*dt;
+
+    // 画面外（下）へ
+    if(b.y - b.r > canvas.height/dpr){
+      if(!b.cut){
+        misses++;
+        updateHUD();
+        if(misses>=CFG.maxMiss){ toGameOver(); }
+      }
+      bananas.splice(i,1);
+    }
+  }
+
+  // 斬撃線分/軌跡の寿命
+  const now=performance.now();
+  while(recentSegments.length && now - recentSegments[0].t > CFG.segmentKeepMs){
+    recentSegments.shift();
+  }
+  while(slashTrail.length && now - slashTrail[0].t > CFG.trailFadeMs){
+    slashTrail.shift();
+  }
+
+  // パーティクル
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.vx*=0.985; p.vy=(p.vy+900*dt)*0.985;
+    p.x+=p.vx*dt/ dpr; p.y+=p.vy*dt/ dpr; // 見た目調整
+    p.life -= dt*1000;
+    if(p.life<=0) particles.splice(i,1);
+  }
+}
+
+/* ========= 描画 ========= */
+function render(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // バナナ
+  for(const b of bananas){
+    drawBanana(b.x, b.y, b.r, b.ang, b.cut);
+  }
+
+  // パーティクル（黄〜茶）
+  for(const p of particles){
+    const alpha = Math.max(0, Math.min(1, p.life/420));
+    ctx.fillStyle = `rgba(250,204,21,${alpha})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 斬撃軌跡（フェード）
+  if(slashTrail.length>1){
+    ctx.lineWidth = CFG.sliceWidth;
+    for(let i=1;i<slashTrail.length;i++){
+      const a=slashTrail[i-1], b=slashTrail[i];
+      const t = (performance.now()-b.t)/CFG.trailFadeMs;
+      const aAlpha = Math.max(0,1 - (performance.now()-a.t)/CFG.trailFadeMs);
+      const bAlpha = Math.max(0,1 - (performance.now()-b.t)/CFG.trailFadeMs);
+      const alpha = Math.max(0, Math.min(1,(aAlpha+bAlpha)/2));
+      ctx.strokeStyle = `rgba(239,68,68,${alpha})`;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
     }
   }
 }
 
-/* ===== スポーン間隔（時間で少しずつ短縮） ===== */
-function pickNextSpawn(){
-  const elapsed = Math.max(0, (performance.now() - playStartAt)/1000);
-  const factor = Math.max(0.6, 1 - (elapsed/100)*CFG.spawnSpeedupPer100Sec);
-  const min = CFG.spawnGapMin*factor, max = CFG.spawnGapMax*factor;
-  return min + Math.random()*(max-min);
+/* バナナ描画（楕円＋縁、回転対応） */
+function drawBanana(cx,cy,r,ang,isCut){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(ang);
+  const w=r*1.8, h=r*1.1;
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,.06)';
+  ctx.beginPath(); ctx.ellipse(3,3, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
+
+  // 実体
+  ctx.fillStyle = isCut? 'rgba(250,204,21,.55)' : 'var(--banana)';
+  ctx.strokeStyle = 'var(--bananaEdge)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0,0, w/2, h/2, -0.3, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+
+  // へた
+  ctx.fillStyle = '#166534';
+  ctx.beginPath(); ctx.arc(-w*0.45, -h*0.1, r*0.18, 0, Math.PI*2); ctx.fill();
+
+  ctx.restore();
 }
 
-/* ===== 入力 ===== */
-addEventListener('keydown', e=>{
-  if(state!=='playing'){ if(e.key===' '||e.key==='ArrowUp') safeStart(); return; }
-  if(e.key===' '||e.key==='ArrowUp'){ if(!keyJump){ keyJump=true; jumpPressed=true; } }
-});
-addEventListener('keyup', e=>{
-  if(e.key===' '||e.key==='ArrowUp'){ keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); }
-});
-
-/* キャンバスのタップでもジャンプ可 */
-canvas.addEventListener('pointerdown', e=>{
-  if(state!=='playing'){ safeStart(); return; }
-  if(!keyJump){ keyJump=true; jumpPressed=true; }
-});
-canvas.addEventListener('pointerup',   e=>{ keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); });
-canvas.addEventListener('pointercancel',e=>{ keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); });
-
-/* フッターのJUMPボタン（重ならない領域） */
-function jumpPressStart(e){ e?.preventDefault?.(); e?.stopPropagation?.(); if(state!=='playing'){ safeStart(); return; } if(!keyJump){ keyJump=true; jumpPressed=true; } }
-function jumpPressEnd(e){ e?.preventDefault?.(); e?.stopPropagation?.(); keyJump=false; jumpPressed=false; jumpHeldMs=0; lastJumpReleaseAt=performance.now(); }
-jumpBtn.addEventListener('pointerdown', jumpPressStart);
-jumpBtn.addEventListener('pointerup',   jumpPressEnd);
-jumpBtn.addEventListener('pointercancel', jumpPressEnd);
-jumpBtn.addEventListener('touchstart',  jumpPressStart, {passive:false});
-jumpBtn.addEventListener('touchend',    jumpPressEnd);
-jumpBtn.addEventListener('mousedown',   jumpPressStart);
-jumpBtn.addEventListener('mouseup',     jumpPressEnd);
-jumpBtn.addEventListener('mouseleave',  jumpPressEnd);
-
-/* ===== 更新 ===== */
-function update(dt){
-  // 時間スコア
-  const elapsed = Math.max(0, (performance.now() - playStartAt)/1000);
-  updateHUD(elapsed);
-
-  // スポーン
-  spawnTimer += dt*1000;
-  if(spawnTimer >= nextSpawn){ spawnTimer = 0; spawnBlock(); nextSpawn = pickNextSpawn(); }
-
-  // ジャンプ開始
-  const now = performance.now();
-  if (jumpPressed && jumpsLeft>0 && (now - lastJumpReleaseAt) > CFG.jumpCooldownMs){
-    const initVy = (player.onGround ? CFG.initialVyGround : CFG.initialVyAir);
-    player.onGround = false; player.vy = initVy;
-    jumpPressed = false; jumpHeldMs = 0; jumpsLeft--;
-  }
-  // 長押し（可変ジャンプ）
-  if (keyJump && !player.onGround && jumpHeldMs < CFG.maxHoldMs){
-    player.vy -= CFG.jumpBoostAcc * dt;
-    jumpHeldMs += dt*1000;
-  }
-
-  // 物理
-  player.vy += CFG.grav * dt;
-  player.y  += player.vy * dt;
-
-  // 天井クランプ
-  const headY = player.y;
-  if(headY <= ceilingY){ player.y = ceilingY; if(player.vy < 0) player.vy = 0; }
-
-  // 地面
-  if(player.y + player.h >= groundY){
-    player.y = groundY - player.h; player.vy = 0;
-    if(!player.onGround){ player.onGround = true; jumpsLeft = CFG.maxJumps; jumpHeldMs = 0; }
-  }
-
-  // ブロック
-  for(let i=blocks.length-1;i>=0;i--){
-    const b = blocks[i];
-    b.x -= b.speed * dt;
-    if(b.x + b.w < -10) blocks.splice(i,1);
-  }
-
-  // 当たり
-  for(const b of blocks){ if(rectHit(player,b)){ toGameOver(); return; } }
+/* ========= HUD ========= */
+function updateHUD(){
+  scoreEl.textContent = String(score);
+  missEl.textContent  = String(misses);
 }
 
-/* ===== ブロック生成（右外から・ズームアウト感） ===== */
-function spawnBlock(){
-  const maxH = Math.min(CFG.block.h*CFG.block.heightMaxScale, groundY - ceilingY - 20);
-  const h = Math.max(24, Math.round( lerp(CFG.block.h, maxH, Math.random()) ));
-  const w = Math.round( CFG.block.w * (0.9 + Math.random()*0.4) );
-  const y = groundY - h;
-  const elapsed = Math.max(0, (performance.now()-playStartAt)/1000);
-  const speed = CFG.block.speed * (1.0 + Math.min(0.5, elapsed/60/6));
-
-  const extra = CFG.extraSpawnOffsetMin + Math.random()*(CFG.extraSpawnOffsetMax - CFG.extraSpawnOffsetMin);
-  blocks.push({ x: canvas.width + extra, y, w, h, speed });
-}
-
-function lerp(a,b,t){ return a + (b-a)*t; }
-function rectHit(a,b){ return !(a.x+a.w<b.x || b.x+b.w<a.x || a.y+a.h<b.y || b.y+b.h<a.y); }
-
-/* ===== 描画 ===== */
-function render(ctx){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  // 地面
-  ctx.fillStyle='var(--ground)';
-  ctx.fillRect(0, groundY, canvas.width, canvas.height-groundY);
-  // ブロック
-  ctx.fillStyle='var(--block)';
-  for(const b of blocks){ ctx.fillRect(b.x,b.y,b.w,b.h); }
-  // 人
-  drawMan(player);
-}
-function drawMan(p){
-  const x=p.x+p.w/2, y=p.y+p.h;
-  ctx.strokeStyle='var(--fg)'; ctx.lineWidth=5; ctx.lineCap='round';
-  ctx.beginPath(); ctx.arc(x,y-0.86*p.h,10,0,Math.PI*2); ctx.stroke();         // 頭
-  ctx.beginPath(); ctx.moveTo(x,y-0.8*p.h); ctx.lineTo(x,y-0.45*p.h); ctx.stroke(); // 胴
-  const t=performance.now()*0.01, swing=Math.sin(t)*8;
-  ctx.beginPath(); ctx.moveTo(x,y-0.7*p.h); ctx.lineTo(x-20+swing,y-0.55*p.h); ctx.stroke(); // 腕L
-  ctx.beginPath(); ctx.moveTo(x,y-0.7*p.h); ctx.lineTo(x+20-swing,y-0.55*p.h); ctx.stroke(); // 腕R
-  const onG=p.onGround, phase=Math.cos(t*0.6), k=onG?1:0.3;
-  ctx.beginPath(); ctx.moveTo(x,y-0.45*p.h); ctx.lineTo(x-16,y-0.06*p.h-8*k*phase); ctx.stroke(); // 脚L
-  ctx.beginPath(); ctx.moveTo(x,y-0.45*p.h); ctx.lineTo(x+16,y-0.06*p.h+8*k*phase); ctx.stroke(); // 脚R
-}
-
-/* ===== HUD（時間：小数1桁） ===== */
-function updateHUD(seconds){ scoreEl.textContent=(Math.floor((seconds||0)*10)/10).toFixed(1); }
-
-/* ===== ループ ===== */
+/* ========= ループ ========= */
 function loop(t){
-  const dt=Math.min(32,t-lastT)/1000||0; lastT=t;
+  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
   if(state==='playing'){ update(dt); }
-  render(ctx);
+  render();
   requestAnimationFrame(loop);
 }
 
-/* ===== 起動 ===== */
+/* ========= 起動 ========= */
+function onResize(){} // ここでは特に不要。サイズはfitCanvasで対応。
 fullReset();
 requestAnimationFrame(loop);
 </script>
