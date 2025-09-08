@@ -6,51 +6,56 @@
 <title>サムライバナナ</title>
 <style>
   :root{
-    --bg:#f6f7fb; --panel:#ffffff; --text:#111827; --muted:#4b5563;
-    --banana:#facc15;      /* バナナ（黄） */
-    --bananaEdge:#a16207;  /* バナナ縁（濃い黄土） */
-    --slash:#ef4444;       /* 斬撃エフェクト（赤） */
-    --border:#e5e7eb; --shadow:0 8px 24px rgba(0,0,0,.08);
+    --bg:#f7f8fc; --panel:#ffffff; --text:#111827; --muted:#4b5563;
+    --banana:#ffd400;      /* ★ 見やすい明るい黄色 */
+    --bananaEdge:#b38600;  /* 縁の濃い黄土色 */
+    --slash:#ef4444;
+    --border:#e5e7eb; --shadow:0 6px 18px rgba(0,0,0,.07);
   }
   *{box-sizing:border-box}
   html,body{
-    height:100%;margin:0;background:var(--bg);color:var(--text);
+    height:100%; margin:0; background:var(--bg); color:var(--text);
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
-    overflow:hidden;
-    touch-action:none; /* スワイプでスクロールしない */
+    overflow:hidden; touch-action:none; /* スワイプでスクロールしない */
   }
   header{
-    padding:10px 14px;border-bottom:1px solid var(--border);background:var(--panel);
-    display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:var(--shadow)
+    height:44px; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--panel);
+    display:flex; align-items:center; justify-content:space-between; gap:10px; box-shadow:var(--shadow)
   }
-  h1{margin:0;font-size:18px;white-space:nowrap}
+  h1{margin:0; font-size:16px; white-space:nowrap}
   .score{
-    font-weight:800;background:#f3f4f6;border:1px solid var(--border);color:#111827;
-    padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums
+    font-weight:800; background:#f3f4f6; border:1px solid var(--border); color:#111827;
+    padding:4px 8px; border-radius:999px; font-variant-numeric:tabular-nums; font-size:13px;
   }
   main{
-    height:calc(100dvh - 48px);
-    max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column
+    height:calc(100dvh - 44px);
+    max-width:980px; margin:0 auto; padding:8px; display:flex; flex-direction:column;
   }
   .stage{
-    position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;
-    background:linear-gradient(180deg,#ffffff,#f6f7fb);box-shadow:var(--shadow)
+    position:relative; flex:1; border:1px solid var(--border); border-radius:12px; overflow:hidden;
+    background:linear-gradient(180deg,#ffffff,#f6f7fb); box-shadow:var(--shadow)
   }
-  canvas{width:100%;height:100%;display:block}
+  canvas{width:100%; height:100%; display:block}
 
-  /* START/RESTART：無装飾 */
+  /* START/RESTART：無装飾ボタンのみ */
   .overlay{
-    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
   }
   .overlay .plain{
-    pointer-events:auto;background:transparent;border:1px solid #111;color:#111;
-    padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer
+    pointer-events:auto; background:transparent; border:1px solid #111; color:#111;
+    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer;
   }
   .overlay.hidden{display:none}
 
+  /* ミス表示（小さく） */
   .hud{
-    position:absolute;left:10px;top:10px;color:var(--muted);font-size:12px;background:rgba(255,255,255,.6);
-    padding:4px 8px;border-radius:8px;border:1px solid var(--border)
+    position:absolute; left:8px; top:8px; color:var(--muted); font-size:12px; background:rgba(255,255,255,.66);
+    padding:3px 6px; border-radius:8px; border:1px solid var(--border)
+  }
+
+  @media (max-width:420px){
+    main{ padding:6px; }
+    .stage{ border-radius:10px; }
   }
 </style>
 </head>
@@ -64,10 +69,8 @@
     <section class="stage" id="stage">
       <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
 
-      <!--（任意）軽いHUD：ミス残回数 -->
       <div id="hud" class="hud">MISS: <span id="miss">0</span>/3</div>
 
-      <!-- START/RESTART（無装飾） -->
       <div id="overlay" class="overlay" role="dialog" aria-modal="true">
         <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
       </div>
@@ -87,14 +90,14 @@ const overlay = document.getElementById('overlay');
 const startBtn= document.getElementById('btnStart');
 
 function fitCanvas(){
-  // 高DPI対応でシャープに
+  // 高DPI対応＋“画面内に確実に収まる”ためのフィット
   const rect = stage.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio||1, 2);
   canvas.width  = Math.max(360, Math.floor(rect.width  * dpr));
   canvas.height = Math.max(480, Math.floor(rect.height * dpr));
-  canvas.style.width  = rect.width+'px';
-  canvas.style.height = rect.height+'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0); // 論理→CSS座標系に統一
+  canvas.style.width  = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0); // 論理座標＝CSS px
   onResize();
 }
 addEventListener('resize', fitCanvas, {passive:true});
@@ -102,9 +105,11 @@ addEventListener('resize', fitCanvas, {passive:true});
 function toPlaying(){
   state='playing';
   overlay.classList.add('hidden');
-  score=0; misses=0; updateHUD();
+  // リセット
+  score=0; misses=0; elapsed=0;
+  updateHUD();
   slashTrail.length=0; recentSegments.length=0; lastCutAt=0; combo=0;
-  bananas.length=0; spawnTimer=0; nextSpawn=pickNextSpawn();
+  bananas.length=0; particles.length=0; spawnTimer=0; nextSpawn=pickNextSpawn();
 }
 function toGameOver(){
   state='gameover';
@@ -129,76 +134,81 @@ startBtn.addEventListener('click', onBtn);
 startBtn.addEventListener('pointerdown', onBtn);
 startBtn.addEventListener('touchstart', onBtn, {passive:false});
 
-/* ========= ゲーム内容 ========= */
+/* ========= ゲーム設定 ========= */
 const CFG = {
-  gravity: 1400,                 // 下向き加速度
-  spawnMin: 320, spawnMax: 900,  // 出現間隔(ms) ランダム
-  speedupSec: 90,                // 経過時間でスポーン短縮
-  radiusMin: 18, radiusMax: 26,  // バナナの基準半径（見た目は楕円）
-  maxMiss: 3,                    // ミス3回で終了
-  baseVy: 260,  vyRand: 180,     // 初速（下向き）
-  vxRand: 140,                   // 横ぶれ
-  spinMin: -3, spinMax: 3,       // 回転速度
-  comboWindow: 600,              // ms以内の連続切りでコンボ継続
-  scoreBase: 10,                 // 基本点
-  sliceWidth: 6,                 // 斬撃の見た目
-  trailFadeMs: 220,              // 斬撃の軌跡フェード
-  segmentKeepMs: 120,            // 判定に使う最近の線分保持時間
-  particleN: 12                  // 斬撃パーティクル数
+  // ★ バナナ大きさ：元の 2.5 倍相当
+  radiusMin: 18*2.5,
+  radiusMax: 26*2.5,
+
+  // 物理
+  gravityBase: 900,      // ★ 初期は弱い重力（ゆっくり）
+  gravityPerScore: 3.6,  // ★ スコアに応じて段階的に増加（1点ごとに足す）
+  baseVyMin: 160, baseVyMax: 220, // ★ 初速も低めから開始
+  vyPerScore: 1.8,       // ★ スコアに応じて初速アップ
+  vxRand: 140,
+  spinMin: -2.5, spinMax: 2.5,
+
+  // スポーン（最初はゆっくり→スコアでテンポUP）
+  spawnMin: 420, spawnMax: 1100,
+  spawnPerScore: 4.0, // スコア1点ごとに ms を短縮（下限あり）
+  spawnMinLimit: 200,
+
+  // ゲーム制約
+  maxMiss: 3,
+  scoreBase: 10,           // 各ヒットの基本点
+  comboWindow: 600,        // 連続斬り判定時間(ms)
+  sliceWidth: 7,           // 斬撃の太さ（少し太く）
+  trailFadeMs: 220,
+  segmentKeepMs: 120,
+  particleN: 14
 };
 
 let score=0, misses=0, elapsed=0;
 let bananas=[], spawnTimer=0, nextSpawn=600;
 let lastCutAt=0, combo=0;
 
-// バナナ生成
-function pickNextSpawn(){
-  // 時間経過で少し短く（最短 220ms 程度）
-  const t = elapsed;
-  const factor = Math.max(0.5, 1 - t/CFG.speedupSec*0.3);
-  const min = CFG.spawnMin * factor;
-  const max = CFG.spawnMax * factor;
-  return min + Math.random()*(max-min);
-}
-function spawnBanana(){
-  const r = rand(CFG.radiusMin, CFG.radiusMax);
-  const x = rand(r+10, canvas.width/dpr - r-10);
-  const vy = CFG.baseVy + Math.random()*CFG.vyRand;
-  const vx = (Math.random()*2-1) * CFG.vxRand;
-  const spin = rand(CFG.spinMin, CFG.spinMax);
-  bananas.push({x,y:-r-10,r, vx,vy, spin, ang:rand(0,Math.PI*2), cut:false});
-}
-
-// ユーティリティ
-const dpr = Math.min(window.devicePixelRatio||1, 2);
+/* ========= 乱数・便利関数 ========= */
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
+/* ========= バナナ生成 ========= */
+function pickNextSpawn(){
+  const dec = score * CFG.spawnPerScore;
+  const min = Math.max(CFG.spawnMinLimit, CFG.spawnMin - dec);
+  const max = Math.max(min+60, CFG.spawnMax - dec*0.7);
+  return min + Math.random()*(max - min);
+}
+function spawnBanana(){
+  const r = rand(CFG.radiusMin, CFG.radiusMax);
+  const x = rand(r+10, canvas.width - r - 10); // 画面内から落下
+  // ★ 初期は遅く、スコアで速く
+  const speedScale = 1 + (score * 0.015); // 例：スコア100で+150%
+  const vy = rand(CFG.baseVyMin, CFG.baseVyMax) * speedScale;
+  const vx = (Math.random()*2-1) * CFG.vxRand;
+  const spin = rand(CFG.spinMin, CFG.spinMax);
+  bananas.push({x, y:-r-12, r, vx, vy, spin, ang:rand(0,Math.PI*2), cut:false});
+}
+
 /* ========= 入力（スワイプ→線分） ========= */
-let pointerDown=false;
-let lastPt=null;
-let slashTrail=[];        // {x,y,t} 可視化用（短命）
-let recentSegments=[];    // {ax,ay,bx,by,t} 衝突判定用
+let pointerDown=false, lastPt=null;
+let slashTrail=[];     // {x,y,t}
+let recentSegments=[]; // {ax,ay,bx,by,t}
 
 function canvasPos(e){
   const rect=canvas.getBoundingClientRect();
-  const x=(e.clientX - rect.left);
-  const y=(e.clientY - rect.top);
-  return {x,y};
+  return { x:(e.clientX-rect.left), y:(e.clientY-rect.top) };
 }
 canvas.addEventListener('pointerdown',e=>{
   if(state!=='playing'){ safeStart(); return; }
-  pointerDown=true; lastPt=canvasPos(e); slashTrail.push({x:lastPt.x,y:lastPt.y,t:performance.now()});
+  pointerDown=true; lastPt=canvasPos(e);
+  slashTrail.push({x:lastPt.x,y:lastPt.y,t:performance.now()});
 });
 canvas.addEventListener('pointermove',e=>{
   if(!pointerDown||state!=='playing') return;
   const p=canvasPos(e); const now=performance.now();
-  // 可視化用の軌跡
   slashTrail.push({x:p.x,y:p.y,t:now});
-  // 線分生成（前点→今点）
   if(lastPt){
     recentSegments.push({ax:lastPt.x,ay:lastPt.y,bx:p.x,by:p.y,t:now});
-    // バナナ当たり判定
     slashCheck(lastPt.x,lastPt.y,p.x,p.y, now);
   }
   lastPt=p;
@@ -206,48 +216,43 @@ canvas.addEventListener('pointermove',e=>{
 addEventListener('pointerup',()=>{ pointerDown=false; lastPt=null; });
 
 function slashCheck(ax,ay,bx,by, time){
-  // 線分 (a->b) と各バナナ（円形近似）距離で判定
   for(const b of bananas){
     if(b.cut) continue;
-    const dist = segCircleDist(ax,ay,bx,by, b.x,b.y,b.r*1.1);
-    if(dist<=0){ // 命中
+    if(segCircleHit(ax,ay,bx,by, b.x,b.y, b.r*0.95)){ // 2.5倍でも当てやすい当たり判定
       b.cut=true;
-      // スコア & コンボ
+      // スコア＆コンボ
       if(time - lastCutAt <= CFG.comboWindow){ combo++; } else { combo=1; }
       lastCutAt=time;
       score += CFG.scoreBase * combo;
       updateHUD();
-
-      // パーティクル & バナナ破片っぽい演出
       spawnParticles(b.x,b.y,b.r);
     }
   }
 }
-function segCircleDist(ax,ay,bx,by, cx,cy,r){
+function segCircleHit(ax,ay,bx,by,cx,cy,r){
   const abx=bx-ax, aby=by-ay;
   const t = clamp(((cx-ax)*abx + (cy-ay)*aby) / (abx*abx+aby*aby||1), 0, 1);
-  const px = ax + abx*t, py = ay + aby*t;
-  const dx = cx - px, dy = cy - py;
-  return Math.hypot(dx,dy) - r;
+  const px=ax+abx*t, py=ay+aby*t;
+  const dx=cx-px, dy=cy-py;
+  return (dx*dx+dy*dy) <= r*r;
 }
 
-/* ========= パーティクル（斬撃演出） ========= */
+/* ========= パーティクル ========= */
 let particles=[]; // {x,y,vx,vy,life}
 function spawnParticles(x,y,r){
   for(let i=0;i<CFG.particleN;i++){
-    const a=Math.random()*Math.PI*2;
-    const s=rand(120,320);
-    particles.push({x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, life: rand(220,420)});
+    const a=Math.random()*Math.PI*2, s=rand(120,320);
+    particles.push({x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, life: rand(260,460)});
   }
 }
 
 /* ========= 初期化 ========= */
 function initGameObjects(){
   score=0; misses=0; elapsed=0;
-  bananas.length=0; particles.length=0;
-  recentSegments.length=0; slashTrail.length=0;
+  bananas.length=0; particles.length=0; recentSegments.length=0; slashTrail.length=0;
   spawnTimer=0; nextSpawn=pickNextSpawn();
 }
+function onResize(){ /* フィットのみでOK */ }
 
 /* ========= 更新 ========= */
 function update(dt){
@@ -259,16 +264,19 @@ function update(dt){
     spawnTimer=0; nextSpawn=pickNextSpawn(); spawnBanana();
   }
 
-  // バナナ移動/判定
+  // ★ スコア依存の重力（だんだん速く落ちる）
+  const gravity = CFG.gravityBase + CFG.gravityPerScore * score;
+
+  // バナナ
   for(let i=bananas.length-1;i>=0;i--){
     const b=bananas[i];
-    b.vy += CFG.gravity*dt;
+    b.vy += gravity*dt;
     b.x  += b.vx*dt;
     b.y  += b.vy*dt;
     b.ang+= b.spin*dt;
 
-    // 画面外（下）へ
-    if(b.y - b.r > canvas.height/dpr){
+    // 下に落ち切った
+    if(b.y - b.r > canvas.height){
       if(!b.cut){
         misses++;
         updateHUD();
@@ -276,22 +284,20 @@ function update(dt){
       }
       bananas.splice(i,1);
     }
+    // 横に出すぎたら少し内側に戻す（画面に収める補正）
+    b.x = clamp(b.x, b.r+2, canvas.width - b.r - 2);
   }
 
-  // 斬撃線分/軌跡の寿命
+  // 最近の線分・軌跡の寿命
   const now=performance.now();
-  while(recentSegments.length && now - recentSegments[0].t > CFG.segmentKeepMs){
-    recentSegments.shift();
-  }
-  while(slashTrail.length && now - slashTrail[0].t > CFG.trailFadeMs){
-    slashTrail.shift();
-  }
+  while(recentSegments.length && now - recentSegments[0].t > CFG.segmentKeepMs) recentSegments.shift();
+  while(slashTrail.length &&    now - slashTrail[0].t    > CFG.trailFadeMs)    slashTrail.shift();
 
   // パーティクル
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
     p.vx*=0.985; p.vy=(p.vy+900*dt)*0.985;
-    p.x+=p.vx*dt/ dpr; p.y+=p.vy*dt/ dpr; // 見た目調整
+    p.x+=p.vx*dt; p.y+=p.vy*dt;
     p.life -= dt*1000;
     if(p.life<=0) particles.splice(i,1);
   }
@@ -301,24 +307,21 @@ function update(dt){
 function render(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // バナナ
-  for(const b of bananas){
-    drawBanana(b.x, b.y, b.r, b.ang, b.cut);
-  }
+  // バナナ（2.5倍サイズ対応）
+  for(const b of bananas) drawBanana(b.x,b.y,b.r,b.ang,b.cut);
 
-  // パーティクル（黄〜茶）
+  // パーティクル
   for(const p of particles){
-    const alpha = Math.max(0, Math.min(1, p.life/420));
-    ctx.fillStyle = `rgba(250,204,21,${alpha})`;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, Math.PI*2); ctx.fill();
+    const alpha = Math.max(0, Math.min(1, p.life/460));
+    ctx.fillStyle = `rgba(255,212,0,${alpha})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2.4, 0, Math.PI*2); ctx.fill();
   }
 
-  // 斬撃軌跡（フェード）
+  // 斬撃
   if(slashTrail.length>1){
     ctx.lineWidth = CFG.sliceWidth;
     for(let i=1;i<slashTrail.length;i++){
       const a=slashTrail[i-1], b=slashTrail[i];
-      const t = (performance.now()-b.t)/CFG.trailFadeMs;
       const aAlpha = Math.max(0,1 - (performance.now()-a.t)/CFG.trailFadeMs);
       const bAlpha = Math.max(0,1 - (performance.now()-b.t)/CFG.trailFadeMs);
       const alpha = Math.max(0, Math.min(1,(aAlpha+bAlpha)/2));
@@ -333,19 +336,20 @@ function drawBanana(cx,cy,r,ang,isCut){
   ctx.save();
   ctx.translate(cx,cy);
   ctx.rotate(ang);
+  // 2.5倍に合わせて太めの縁・大きめの楕円
   const w=r*1.8, h=r*1.1;
   // 影
   ctx.fillStyle = 'rgba(0,0,0,.06)';
-  ctx.beginPath(); ctx.ellipse(3,3, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(4,4, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
 
   // 実体
-  ctx.fillStyle = isCut? 'rgba(250,204,21,.55)' : 'var(--banana)';
-  ctx.strokeStyle = 'var(--bananaEdge)'; ctx.lineWidth = 2;
+  ctx.fillStyle = isCut? 'rgba(255,212,0,.55)' : 'var(--banana)';
+  ctx.strokeStyle = 'var(--bananaEdge)'; ctx.lineWidth = 2.4;
   ctx.beginPath(); ctx.ellipse(0,0, w/2, h/2, -0.3, 0, Math.PI*2); ctx.fill(); ctx.stroke();
 
-  // へた
-  ctx.fillStyle = '#166534';
-  ctx.beginPath(); ctx.arc(-w*0.45, -h*0.1, r*0.18, 0, Math.PI*2); ctx.fill();
+  // へた（少し大きめ）
+  ctx.fillStyle = '#167c3a';
+  ctx.beginPath(); ctx.arc(-w*0.45, -h*0.12, r*0.22, 0, Math.PI*2); ctx.fill();
 
   ctx.restore();
 }
@@ -365,7 +369,7 @@ function loop(t){
 }
 
 /* ========= 起動 ========= */
-function onResize(){} // ここでは特に不要。サイズはfitCanvasで対応。
+function onResize(){}
 fullReset();
 requestAnimationFrame(loop);
 </script>
