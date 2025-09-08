@@ -37,13 +37,13 @@
   }
   canvas{width:100%; height:100%; display:block}
 
-  /* START/RESTART：無装飾ボタンのみ */
+  /* START/RESTART：無装飾ボタンのみ（オーバーレイは透過で邪魔しない） */
   .overlay{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
   }
   .overlay .plain{
     pointer-events:auto; background:transparent; border:1px solid #111; color:#111;
-    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer;
+    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer; touch-action:manipulation;
   }
   .overlay.hidden{display:none}
 
@@ -73,8 +73,10 @@
   </main>
 
 <script>
-/* ========= 画面/状態 ========= */
-let state='idle', starting=false, lastT=0;
+/* ====== ループは一度だけ起動／状態はここで集中管理 ====== */
+let state='idle';            // 'idle' | 'playing' | 'gameover'
+let starting=false;          // 多重開始防止
+let lastT=0;
 
 const stage   = document.getElementById('stage');
 const canvas  = document.getElementById('game');
@@ -84,29 +86,29 @@ const missEl  = document.getElementById('miss');
 const overlay = document.getElementById('overlay');
 const startBtn= document.getElementById('btnStart');
 
-/* ★ ゲーム座標は CSS ピクセルで統一 */
-let viewW = 720, viewH = 1080;
-
+/* CSSピクセル座標（ロジック用）＋ DPRスケール（描画用） */
+let viewW=720, viewH=1080, dpr=1;
 function fitCanvas(){
   const rect = stage.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  dpr = Math.min(window.devicePixelRatio||1, 2);
   canvas.width  = Math.max(360, Math.floor(rect.width  * dpr));
   canvas.height = Math.max(480, Math.floor(rect.height * dpr));
   canvas.style.width  = rect.width + 'px';
   canvas.style.height = rect.height + 'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0);            // 描画だけ高DPI
-  viewW = rect.width; viewH = rect.height;      // ロジックは CSS px
+  ctx.setTransform(dpr,0,0,dpr,0,0); // 描画だけ高DPI
+  viewW = rect.width; viewH = rect.height;
   onResize();
 }
 addEventListener('resize', fitCanvas, {passive:true});
 
+/* ====== 安全な開始・再開始 ====== */
 function toPlaying(){
   state='playing';
   overlay.classList.add('hidden');
-  score=0; misses=0; elapsed=0;
-  updateHUD();
-  slashTrail.length=0; recentSegments.length=0; lastCutAt=0; combo=0;
-  bananas.length=0; particles.length=0; spawnTimer=0; nextSpawn=pickNextSpawn();
+  // ランタイムの再初期化
+  score=0; misses=0; elapsed=0; updateHUD();
+  bananas.length=particles.length=recentSegments.length=slashTrail.length=0;
+  spawnTimer=0; nextSpawn=pickNextSpawn(); lastCutAt=0; combo=0;
 }
 function toGameOver(){
   state='gameover';
@@ -116,62 +118,61 @@ function toGameOver(){
 function fullReset(){
   state='idle'; starting=false; lastT=0;
   fitCanvas();
-  initGameObjects();
+  initGameObjects(); // 静的初期化
   startBtn.textContent='START';
   overlay.classList.remove('hidden');
   updateHUD();
 }
 function safeStart(){
-  if(starting||state==='playing') return;
-  starting=true; fullReset(); toPlaying();
-  setTimeout(()=>{ starting=false; }, 120);
+  if(starting || state==='playing') return;
+  starting = true;
+  fullReset();
+  toPlaying();
+  setTimeout(()=>{ starting=false; }, 120); // ダブルタップ吸収
 }
-function onBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
-startBtn.addEventListener('click', onBtn);
-startBtn.addEventListener('pointerdown', onBtn);
-startBtn.addEventListener('touchstart', onBtn, {passive:false});
+/* Start/Restart ボタン：3系統 */
+function onStartBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
+startBtn.addEventListener('click', onStartBtn);
+startBtn.addEventListener('pointerdown', onStartBtn);
+startBtn.addEventListener('touchstart', onStartBtn, {passive:false});
 
-/* ========= ゲーム設定（“じわじわ”加速に調整） ========= */
+/* キャンバスをタップしても開始できる（idle/gameover時のみ） */
+canvas.addEventListener('pointerdown', e=>{
+  if(state!=='playing'){ onStartBtn(e); }
+});
+
+/* ====== ゲーム設定（“細長い黄色のバナナ”＆じわじわ加速） ====== */
 const CFG = {
-  // サイズ（細長い見た目を描画関数で実現）
-  sizeMin: 46, sizeMax: 64,
-
-  // 物理（初期は遅く、上がり方は緩やか）
-  gravityBase: 820,       // ↓ 少し弱め
-  gravityPerScore: 1.2,   // ↓ 1点ごとの増加を小さく
-  baseVyMin: 150, baseVyMax: 210, // 初速も控えめ
-  vyPerScore: 0.6,        // ↓ 1点ごとの初速増加を小さく
+  sizeMin: 46, sizeMax: 64,          // バナナ太さ基準
+  gravityBase: 820, gravityPerScore: 1.2,
+  baseVyMin: 150, baseVyMax: 210,
+  vyPerScore: 0.6,
   vxRand: 140,
   spinMin: -2.2, spinMax: 2.2,
-
-  // スポーン（間隔短縮も緩やかに）
   spawnMin: 460, spawnMax: 1180,
-  spawnPerScore: 2.0,     // ↓ 短縮幅を小さく
-  spawnMinLimit: 260,
-
-  // ゲーム制約
-  maxMiss: 3,
-  scoreBase: 10,
-  comboWindow: 600,
-  sliceWidth: 7,
-  trailFadeMs: 220,
-  segmentKeepMs: 120,
-  particleN: 14,
-
-  // 端の跳ね返り（画面外へ出さない）
-  bounceDampen: 0.6,
-  sideMargin: 4
+  spawnPerScore: 2.0, spawnMinLimit: 260,
+  maxMiss: 3, scoreBase: 10, comboWindow: 600,
+  sliceWidth: 7, trailFadeMs: 220, segmentKeepMs: 120, particleN: 14,
+  bounceDampen: 0.6, sideMargin: 4
 };
 
+/* ====== 変数群 ====== */
 let score=0, misses=0, elapsed=0;
-let bananas=[], spawnTimer=0, nextSpawn=600;
+let bananas=[], particles=[];
+let slashTrail=[], recentSegments=[];
+let spawnTimer=0, nextSpawn=600;
 let lastCutAt=0, combo=0;
 
-/* ========= 乱数・便利関数 ========= */
+/* ====== 初期化（静的） ====== */
+function initGameObjects(){
+  score=0; misses=0; elapsed=0;
+  bananas.length=particles.length=slashTrail.length=recentSegments.length=0;
+  spawnTimer=0; nextSpawn=pickNextSpawn(); lastCutAt=0; combo=0;
+}
+
+/* ====== スポーン & 物理 ====== */
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-
-/* ========= バナナ生成（画面幅に対して安全なスポーン） ========= */
 function safeSpawnX(halfW){
   const margin = Math.max(CFG.sideMargin, halfW + 6);
   return rand(margin, viewW - margin);
@@ -183,35 +184,30 @@ function pickNextSpawn(){
   return min + Math.random()*(max - min);
 }
 function spawnBanana(){
-  const s = rand(CFG.sizeMin, CFG.sizeMax);   // 太さ基準
-  const halfW = (s*0.9);
-  const x = safeSpawnX(halfW);
-
-  // ★ じわじわ上がる初速
-  const speedScale = 1 + (score * 0.006);     // 以前の 0.015 → 0.006 に
-  const vy = rand(CFG.baseVyMin, CFG.baseVyMax) * speedScale;
-  const vx = (Math.random()*2-1) * CFG.vxRand;
-  const spin = rand(CFG.spinMin, CFG.spinMax);
-  bananas.push({x, y:-s-16, s, vx, vy, spin, ang:rand(0,Math.PI*2), cut:false});
+  const s   = rand(CFG.sizeMin, CFG.sizeMax);
+  const halfW = s*0.9;
+  const x   = safeSpawnX(halfW);
+  const vy  = rand(CFG.baseVyMin, CFG.baseVyMax) * (1 + score*0.006); // じわじわ
+  const vx  = (Math.random()*2-1) * CFG.vxRand;
+  const ang = rand(0,Math.PI*2);
+  const spin= rand(CFG.spinMin, CFG.spinMax);
+  bananas.push({x, y:-s-16, s, vx, vy, ang, spin, cut:false});
 }
 
-/* ========= 入力（スワイプ→線分） ========= */
+/* ====== 入力：スワイプを線分に変換 ====== */
 let pointerDown=false, lastPt=null;
-let slashTrail=[];     // {x,y,t}
-let recentSegments=[]; // {ax,ay,bx,by,t}
-
 function canvasPos(e){
-  const rect=canvas.getBoundingClientRect();
-  return { x:(e.clientX-rect.left), y:(e.clientY-rect.top) }; // CSS px
+  const r=canvas.getBoundingClientRect();
+  return {x:(e.clientX-r.left), y:(e.clientY-r.top)}; // CSS px
 }
-canvas.addEventListener('pointerdown',e=>{
-  if(state!=='playing'){ safeStart(); return; }
+canvas.addEventListener('pointerdown', e=>{
+  if(state!=='playing'){ return; } // 上のhandlerで開始済み
   pointerDown=true; lastPt=canvasPos(e);
   slashTrail.push({x:lastPt.x,y:lastPt.y,t:performance.now()});
 });
-canvas.addEventListener('pointermove',e=>{
-  if(!pointerDown||state!=='playing') return;
-  const p=canvasPos(e); const now=performance.now();
+canvas.addEventListener('pointermove', e=>{
+  if(!pointerDown || state!=='playing') return;
+  const p=canvasPos(e), now=performance.now();
   slashTrail.push({x:p.x,y:p.y,t:now});
   if(lastPt){
     recentSegments.push({ax:lastPt.x,ay:lastPt.y,bx:p.x,by:p.y,t:now});
@@ -219,16 +215,21 @@ canvas.addEventListener('pointermove',e=>{
   }
   lastPt=p;
 });
-addEventListener('pointerup',()=>{ pointerDown=false; lastPt=null; });
+addEventListener('pointerup', ()=>{ pointerDown=false; lastPt=null; });
 
+function segCircleHit(ax,ay,bx,by,cx,cy,r){
+  const abx=bx-ax, aby=by-ay;
+  const t = clamp(((cx-ax)*abx + (cy-ay)*aby) / (abx*abx+aby*aby||1), 0, 1);
+  const px=ax+abx*t, py=ay+aby*t, dx=cx-px, dy=cy-py;
+  return (dx*dx+dy*dy) <= r*r;
+}
 function slashCheck(ax,ay,bx,by, time){
   for(const b of bananas){
     if(b.cut) continue;
-    // 外接円で近似（細長いが当てやすさ重視）
-    const r = b.s * 1.0;
-    if(segCircleHit(ax,ay,bx,by, b.x,b.y, r)){
+    const r=b.s*1.0; // 細長いが当てやすさ重視で円近似
+    if(segCircleHit(ax,ay,bx,by,b.x,b.y,r)){
       b.cut=true;
-      if(time - lastCutAt <= CFG.comboWindow){ combo++; } else { combo=1; }
+      combo = (time-lastCutAt<=CFG.comboWindow) ? (combo+1) : 1;
       lastCutAt=time;
       score += CFG.scoreBase * combo;
       updateHUD();
@@ -236,33 +237,16 @@ function slashCheck(ax,ay,bx,by, time){
     }
   }
 }
-function segCircleHit(ax,ay,bx,by,cx,cy,r){
-  const abx=bx-ax, aby=by-ay;
-  const t = clamp(((cx-ax)*abx + (cy-ay)*aby) / (abx*abx+aby*aby||1), 0, 1);
-  const px=ax+abx*t, py=ay+aby*t;
-  const dx=cx-px, dy=cy-py;
-  return (dx*dx+dy*dy) <= r*r;
-}
 
-/* ========= パーティクル ========= */
-let particles=[]; // {x,y,vx,vy,life}
+/* ====== パーティクル ====== */
 function spawnParticles(x,y,s){
   for(let i=0;i<CFG.particleN;i++){
-    const a=Math.random()*Math.PI*2, spd=rand(120,320);
-    particles.push({x,y, vx:Math.cos(a)*spd, vy:Math.sin(a)*spd, life: rand(260,460)});
+    const a=Math.random()*Math.PI*2, sp=rand(120,320);
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:rand(260,460)});
   }
 }
 
-/* ========= 初期化 ========= */
-function initGameObjects(){
-  score=0; misses=0; elapsed=0;
-  bananas.length=0; particles.length=0; recentSegments.length=0; slashTrail.length=0;
-  spawnTimer=0; nextSpawn=pickNextSpawn();
-}
-function onResize(){}
-
-/* ========= 更新 ========= */
-let spawnTimer=0, nextSpawn=600;
+/* ====== 更新・描画 ====== */
 function update(dt){
   elapsed += dt;
 
@@ -272,7 +256,7 @@ function update(dt){
     spawnTimer=0; nextSpawn=pickNextSpawn(); spawnBanana();
   }
 
-  // ★ スコア依存の重力（“じわじわ”）
+  // じわじわ加速（重力）
   const gravity = CFG.gravityBase + CFG.gravityPerScore * score;
 
   // バナナ
@@ -283,120 +267,106 @@ function update(dt){
     b.y  += b.vy*dt;
     b.ang+= b.spin*dt;
 
-    // 左右端で跳ね返り（画面外へ出さない）
-    const halfW = b.s * 0.9;
+    // 端バウンド（画面外に出ない）
+    const halfW = b.s*0.9;
     if(b.x < halfW + CFG.sideMargin){
-      b.x = halfW + CFG.sideMargin;
-      b.vx = Math.abs(b.vx) * CFG.bounceDampen;
+      b.x = halfW + CFG.sideMargin; b.vx = Math.abs(b.vx)*CFG.bounceDampen;
     }else if(b.x > viewW - (halfW + CFG.sideMargin)){
-      b.x = viewW - (halfW + CFG.sideMargin);
-      b.vx = -Math.abs(b.vx) * CFG.bounceDampen;
+      b.x = viewW - (halfW + CFG.sideMargin); b.vx = -Math.abs(b.vx)*CFG.bounceDampen;
     }
 
-    // 下に落ち切った
+    // 画面下に落下
     if(b.y - b.s > viewH){
       if(!b.cut){
-        misses++;
-        updateHUD();
+        misses++; updateHUD();
         if(misses>=CFG.maxMiss){ toGameOver(); }
       }
       bananas.splice(i,1);
     }
   }
 
-  // 最近の線分・軌跡の寿命
+  // 線分・軌跡の寿命
   const now=performance.now();
   while(recentSegments.length && now - recentSegments[0].t > CFG.segmentKeepMs) recentSegments.shift();
-  while(slashTrail.length &&    now - slashTrail[0].t    > CFG.trailFadeMs)    slashTrail.shift();
+  while(slashTrail.length    && now - slashTrail[0].t    > CFG.trailFadeMs)    slashTrail.shift();
 
   // パーティクル
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
     p.vx*=0.985; p.vy=(p.vy+900*dt)*0.985;
-    p.x+=p.vx*dt; p.y+=p.vy*dt;
-    p.life -= dt*1000;
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt*1000;
     if(p.life<=0) particles.splice(i,1);
   }
 }
-
-/* ========= 描画 ========= */
 function render(){
   ctx.clearRect(0,0,viewW,viewH);
 
-  // バナナ（細長い三日月形、黄色）
-  for(const b of bananas) drawBananaCrescent(b.x,b.y,b.s,b.ang,b.cut);
+  // バナナ（細長い三日月・黄色）
+  for(const b of bananas){ drawBananaCrescent(b.x,b.y,b.s,b.ang,b.cut); }
 
-  // パーティクル（黄色系）
+  // パーティクル（黄色）
   for(const p of particles){
-    const alpha = Math.max(0, Math.min(1, p.life/460));
-    ctx.fillStyle = `rgba(255,212,0,${alpha})`;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 2.4, 0, Math.PI*2); ctx.fill();
+    const alpha=Math.max(0,Math.min(1,p.life/460));
+    ctx.fillStyle=`rgba(255,212,0,${alpha})`;
+    ctx.beginPath(); ctx.arc(p.x,p.y,2.4,0,Math.PI*2); ctx.fill();
   }
 
-  // 斬撃
+  // 斬撃軌跡
   if(slashTrail.length>1){
-    ctx.lineWidth = CFG.sliceWidth;
-    ctx.strokeStyle = 'rgba(239,68,68,1)';
+    ctx.lineWidth=CFG.sliceWidth;
     for(let i=1;i<slashTrail.length;i++){
       const a=slashTrail[i-1], b=slashTrail[i];
-      const aAlpha = Math.max(0,1 - (performance.now()-a.t)/CFG.trailFadeMs);
-      const bAlpha = Math.max(0,1 - (performance.now()-b.t)/CFG.trailFadeMs);
-      const alpha = Math.max(0, Math.min(1,(aAlpha+bAlpha)/2));
-      ctx.strokeStyle = `rgba(239,68,68,${alpha})`;
+      const aA=Math.max(0,1-(performance.now()-a.t)/CFG.trailFadeMs);
+      const bA=Math.max(0,1-(performance.now()-b.t)/CFG.trailFadeMs);
+      const alpha=Math.max(0,Math.min(1,(aA+bA)/2));
+      ctx.strokeStyle=`rgba(239,68,68,${alpha})`;
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
     }
   }
 }
 
-/* ★ 細長い“バナナらしい”三日月（ベジェ強化版） */
+/* 細長い三日月バナナ（ベジェ） */
 function drawBananaCrescent(cx,cy,s,ang,isCut){
-  // s: 太さ基準。長さ↑／厚み↓でより細長く
-  const L = s * 4.0;      // ← 長さをさらに伸ばす
-  const T = s * 0.65;     // ← 厚みを薄く
-  const C = s * 2.0;      // ← 反り強め
-  ctx.save();
-  ctx.translate(cx,cy);
-  ctx.rotate(ang);
+  const L=s*4.0, T=s*0.65, C=s*2.0;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(ang);
 
-  // 本体パス（上辺→先端→下辺→戻る）
   ctx.beginPath();
   ctx.moveTo(-L*0.5, -T*0.36);
-  ctx.quadraticCurveTo( 0, -C,  L*0.5, -T*0.12);   // 上カーブ
-  ctx.lineTo(L*0.5 - s*0.20,  T*0.12);            // 先端厚み
-  ctx.quadraticCurveTo( 0,  C, -L*0.5,  T*0.36);   // 下カーブ
+  ctx.quadraticCurveTo(0,-C, L*0.5,-T*0.12);
+  ctx.lineTo(L*0.5 - s*0.20, T*0.12);
+  ctx.quadraticCurveTo(0, C, -L*0.5, T*0.36);
   ctx.closePath();
 
-  ctx.fillStyle   = isCut ? 'rgba(255,212,0,.55)' : 'var(--banana)'; // 常に黄色系
-  ctx.strokeStyle = 'var(--bananaEdge)';
-  ctx.lineWidth   = Math.max(2, s*0.12);
-  ctx.fill();
-  ctx.stroke();
+  ctx.fillStyle = isCut ? 'rgba(255,212,0,.55)' : 'var(--banana)';
+  ctx.strokeStyle='var(--bananaEdge)';
+  ctx.lineWidth=Math.max(2,s*0.12);
+  ctx.fill(); ctx.stroke();
 
-  // へた（左後端）
-  ctx.fillStyle = '#167c3a';
+  // へた
+  ctx.fillStyle='#167c3a';
   ctx.beginPath(); ctx.ellipse(-L*0.52, -T*0.06, s*0.18, s*0.14, -0.2, 0, Math.PI*2); ctx.fill();
 
   ctx.restore();
 }
 
-/* ========= HUD ========= */
+/* ====== HUD ====== */
 function updateHUD(){
-  scoreEl.textContent = String(score);
-  missEl.textContent  = String(misses);
+  scoreEl.textContent=String(score);
+  missEl.textContent=String(misses);
 }
 
-/* ========= ループ ========= */
+/* ====== ループ（一度だけ起動） ====== */
 function loop(t){
-  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
+  const dt=Math.min(32, t-lastT)/1000 || 0; lastT=t;
   if(state==='playing'){ update(dt); }
   render();
   requestAnimationFrame(loop);
 }
 
-/* ========= 起動 ========= */
+/* ====== 起動 ====== */
 function onResize(){}
-fullReset();
-requestAnimationFrame(loop);
+fullReset();           // 初期化（idle表示）
+requestAnimationFrame(loop); // ループは一度だけ
 </script>
 </body>
 </html>
