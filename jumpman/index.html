@@ -7,11 +7,12 @@
 <style>
   :root{
     --bg:#f7f8fc; --panel:#ffffff; --text:#111827; --muted:#4b5563;
-    /* 🍎 リンゴ色 */
-    --apple:#ef4444;      /* 本体の赤 */
-    --appleEdge:#7f1d1d;  /* 縁の濃い赤 */
-    --leaf:#16a34a;       /* 葉の緑 */
-    --stem:#6b4f1d;       /* ヘタの茶 */
+    /* 🍎 リンゴ（赤系のみ） */
+    --apple:#ef4444;        /* 本体の赤 */
+    --appleEdge:#7f1d1d;    /* 縁の濃い赤 */
+    --appleLight:#ff8a8a;   /* ハイライト用の明るい赤 */
+    --leaf:#16a34a;         /* 葉 */
+    --stem:#6b4f1d;         /* ヘタ */
     --slash:#ef4444;
     --border:#e5e7eb; --shadow:0 6px 18px rgba(0,0,0,.07);
   }
@@ -19,7 +20,7 @@
   html,body{
     height:100%; margin:0; background:var(--bg); color:var(--text);
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
-    overflow:hidden; touch-action:none; /* スワイプでスクロールしない */
+    overflow:hidden; touch-action:none;
   }
   header{
     height:44px; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--panel);
@@ -40,18 +41,15 @@
   }
   canvas{width:100%; height:100%; display:block}
 
-  /* START/RESTART：無装飾ボタンのみ */
   .overlay{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
   }
   .overlay .plain{
     pointer-events:auto; background:transparent; border:1px solid #111; color:#111;
-    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer;
-    touch-action:manipulation;
+    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer; touch-action:manipulation;
   }
   .overlay.hidden{display:none}
 
-  /* ミス表示（小さく） */
   .hud{
     position:absolute; left:8px; top:8px; color:var(--muted); font-size:12px; background:rgba(255,255,255,.66);
     padding:3px 6px; border-radius:8px; border:1px solid var(--border)
@@ -88,9 +86,8 @@ const missEl  = document.getElementById('miss');
 const overlay = document.getElementById('overlay');
 const startBtn= document.getElementById('btnStart');
 
-/* ★ ゲーム座標は CSS ピクセルで統一（描画のみDPR対応） */
+/* CSSピクセルで統一（描画のみDPR対応） */
 let viewW = 720, viewH = 1080, dpr = 1;
-
 function fitCanvas(){
   const rect = stage.getBoundingClientRect();
   dpr = Math.min(window.devicePixelRatio||1, 2);
@@ -98,17 +95,16 @@ function fitCanvas(){
   canvas.height = Math.max(480, Math.floor(rect.height * dpr));
   canvas.style.width  = rect.width + 'px';
   canvas.style.height = rect.height + 'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0);   // 描画だけ高DPI
-  viewW = rect.width; viewH = rect.height; // ロジックはCSS px
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  viewW = rect.width; viewH = rect.height;
   onResize();
 }
 addEventListener('resize', fitCanvas, {passive:true});
 
-/* ========= 状態遷移 ========= */
+/* ========= スタート/リスタート ========= */
 function toPlaying(){
   state='playing';
   overlay.classList.add('hidden');
-  // ランタイム初期化
   score=0; misses=0; elapsed=0; updateHUD();
   apples.length=particles.length=recentSegments.length=slashTrail.length=0;
   spawnTimer=0; nextSpawn=pickNextSpawn(); lastCutAt=0; combo=0;
@@ -129,7 +125,7 @@ function fullReset(){
 function safeStart(){
   if(starting||state==='playing') return;
   starting=true; fullReset(); toPlaying();
-  setTimeout(()=>{ starting=false; }, 120); // 多重タップ吸収
+  setTimeout(()=>{ starting=false; }, 120);
 }
 function onBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
 startBtn.addEventListener('click', onBtn);
@@ -137,25 +133,23 @@ startBtn.addEventListener('pointerdown', onBtn);
 startBtn.addEventListener('touchstart', onBtn, {passive:false});
 canvas.addEventListener('pointerdown', e=>{ if(state!=='playing') onBtn(e); });
 
-/* ========= 設定 ========= */
+/* ========= 設定（サイズ1.2倍 & 赤統一） ========= */
 const CFG = {
-  // サイズ（リンゴ半径の基準）
-  sizeMin: 28, sizeMax: 36,
+  /* ★ サイズ 1.2倍：もとの 28–36 → 34–44 */
+  sizeMin: 34, sizeMax: 44,
 
-  // 物理（なめらか加速に最適化）
-  gravityBase: 820,                 // 初期重力
-  gravityMaxBoost: 0.8,             // 重力倍率の最大上昇量（+80%まで）
-  baseVyMin: 150, baseVyMax: 210,   // 初速の基準
-  vyMaxBoost: 0.5,                  // 初速倍率の最大上昇量（+50%まで）
+  /* なめらか加速は前回のまま（指数緩和） */
+  gravityBase: 820,
+  gravityMaxBoost: 0.8,
+  baseVyMin: 150, baseVyMax: 210,
+  vyMaxBoost: 0.5,
 
   vxRand: 140,
-  spinMin: -1.6, spinMax: 1.6,      // リンゴはあまり回転させない
+  spinMin: -1.6, spinMax: 1.6,
 
-  // スポーン（間隔短縮もなだらか）
   spawnMin: 520, spawnMax: 1200,
   spawnMinLimit: 320,
 
-  // ゲーム制約
   maxMiss: 3,
   scoreBase: 10,
   comboWindow: 600,
@@ -164,23 +158,18 @@ const CFG = {
   segmentKeepMs: 120,
   particleN: 14,
 
-  // 端で跳ね返り（画面外に出さない）
   bounceDampen: 0.6,
   sideMargin: 4
 };
 
-/* ★ “なめらか加速”関数：0→1に飽和する曲線（指数緩和） */
+/* なめらか増加 */
 function smooth01(x, k=40){ return 1 - Math.exp(-x / k); }
-/* 速度スケール（1.0〜1.0+maxBoost まで緩やかに増加） */
-function speedScale(score, maxBoost){
-  return 1 + maxBoost * smooth01(score, 40);         // スコア40付近で半分程度
-}
-/* スポーン短縮（徐々に短く・下限あり） */
+function speedScale(score, maxBoost){ return 1 + maxBoost * smooth01(score, 40); }
 function spawnMillis(score){
-  const t = smooth01(score, 50);                      // 0→1へ緩やか
-  const min = Math.max(CFG.spawnMinLimit, CFG.spawnMin - 300*t);
-  const max = CFG.spawnMax - 300*t*0.7;
-  return {min, max: Math.max(min+60, max)};
+  const t=smooth01(score,50);
+  const min=Math.max(CFG.spawnMinLimit, CFG.spawnMin - 300*t);
+  const max=CFG.spawnMax - 300*t*0.7;
+  return {min, max:Math.max(min+60,max)};
 }
 
 /* ========= 変数 ========= */
@@ -198,7 +187,7 @@ function initGameObjects(){
 }
 function onResize(){}
 
-/* ========= 乱数・ユーティリティ ========= */
+/* ========= 乱数 ========= */
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
@@ -208,13 +197,13 @@ function safeSpawnX(halfR){
   return rand(margin, viewW - margin);
 }
 function pickNextSpawn(){
-  const {min, max} = spawnMillis(score);
-  return min + Math.random()*(max - min);
+  const {min,max}=spawnMillis(score);
+  return min + Math.random()*(max-min);
 }
 function spawnApple(){
   const r = rand(CFG.sizeMin, CFG.sizeMax);
   const x = safeSpawnX(r);
-  const vScale = speedScale(score, CFG.vyMaxBoost); // 初速の緩やかな倍率
+  const vScale = speedScale(score, CFG.vyMaxBoost);
   const vy = rand(CFG.baseVyMin, CFG.baseVyMax) * vScale;
   const vx = (Math.random()*2-1) * CFG.vxRand;
   const ang = rand(0,Math.PI*2);
@@ -222,14 +211,14 @@ function spawnApple(){
   apples.push({x, y:-r-14, r, vx, vy, ang, spin, cut:false});
 }
 
-/* ========= 入力（スワイプ→線分） ========= */
+/* ========= 入力（スワイプ） ========= */
 let pointerDown=false, lastPt=null;
 function canvasPos(e){
   const rect=canvas.getBoundingClientRect();
-  return {x:(e.clientX-rect.left), y:(e.clientY-rect.top)}; // CSS px
+  return {x:(e.clientX-rect.left), y:(e.clientY-rect.top)};
 }
 canvas.addEventListener('pointerdown',e=>{
-  if(state!=='playing'){ return; } // 上で開始処理済み
+  if(state!=='playing'){ return; }
   pointerDown=true; lastPt=canvasPos(e);
   slashTrail.push({x:lastPt.x,y:lastPt.y,t:performance.now()});
 });
@@ -254,7 +243,7 @@ function segCircleHit(ax,ay,bx,by,cx,cy,r){
 function slashCheck(ax,ay,bx,by, time){
   for(const a of apples){
     if(a.cut) continue;
-    if(segCircleHit(ax,ay,bx,by,a.x,a.y,a.r*0.95)){ // 当てやすい少し甘め半径
+    if(segCircleHit(ax,ay,bx,by,a.x,a.y,a.r*0.95)){
       a.cut=true;
       combo = (time-lastCutAt<=CFG.comboWindow) ? (combo+1) : 1;
       lastCutAt=time;
@@ -283,11 +272,11 @@ function update(dt){
     spawnTimer=0; nextSpawn=pickNextSpawn(); spawnApple();
   }
 
-  // ★ なめらか重力（倍率は 1 → 1+gravityMaxBoost に漸近）
+  // 重力も緩やかに増加
   const gScale = 1 + CFG.gravityMaxBoost * smooth01(score, 50);
   const gravity = CFG.gravityBase * gScale;
 
-  // リンゴの移動
+  // リンゴ更新
   for(let i=apples.length-1;i>=0;i--){
     const a=apples[i];
     a.vy += gravity*dt;
@@ -295,15 +284,15 @@ function update(dt){
     a.y  += a.vy*dt;
     a.ang+= a.spin*dt;
 
-    // 端の跳ね返り（画面外に出さない）
-    const half = a.r;
+    // 横端でバウンド
+    const half=a.r;
     if(a.x < half + CFG.sideMargin){
-      a.x = half + CFG.sideMargin; a.vx = Math.abs(a.vx) * CFG.bounceDampen;
+      a.x = half + CFG.sideMargin; a.vx = Math.abs(a.vx)*CFG.bounceDampen;
     }else if(a.x > viewW - (half + CFG.sideMargin)){
-      a.x = viewW - (half + CFG.sideMargin); a.vx = -Math.abs(a.vx) * CFG.bounceDampen;
+      a.x = viewW - (half + CFG.sideMargin); a.vx = -Math.abs(a.vx)*CFG.bounceDampen;
     }
 
-    // 画面下へ落下
+    // 画面下
     if(a.y - a.r > viewH){
       if(!a.cut){
         misses++; updateHUD();
@@ -313,7 +302,7 @@ function update(dt){
     }
   }
 
-  // 線分/軌跡の寿命
+  // 斬撃軌跡の寿命
   const now=performance.now();
   while(recentSegments.length && now - recentSegments[0].t > CFG.segmentKeepMs) recentSegments.shift();
   while(slashTrail.length    && now - slashTrail[0].t    > CFG.trailFadeMs)    slashTrail.shift();
@@ -331,63 +320,55 @@ function update(dt){
 function render(){
   ctx.clearRect(0,0,viewW,viewH);
 
-  // 🍎 リンゴ
+  // 🍎 リンゴ（赤オンリー配色）
   for(const a of apples){ drawApple(a.x,a.y,a.r,a.ang,a.cut); }
-
-  // パーティクル（赤〜オレンジ系）
-  for(const p of particles){
-    const alpha = Math.max(0, Math.min(1, p.life/460));
-    ctx.fillStyle = `rgba(239,68,68,${alpha})`;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, Math.PI*2); ctx.fill();
-  }
 
   // 斬撃
   if(slashTrail.length>1){
-    ctx.lineWidth = CFG.sliceWidth;
+    ctx.lineWidth=CFG.sliceWidth;
     for(let i=1;i<slashTrail.length;i++){
       const a=slashTrail[i-1], b=slashTrail[i];
-      const aAlpha = Math.max(0,1 - (performance.now()-a.t)/CFG.trailFadeMs);
-      const bAlpha = Math.max(0,1 - (performance.now()-b.t)/CFG.trailFadeMs);
-      const alpha = Math.max(0, Math.min(1,(aAlpha+bAlpha)/2));
-      ctx.strokeStyle = `rgba(239,68,68,${alpha})`;
+      const aA=Math.max(0,1-(performance.now()-a.t)/CFG.trailFadeMs);
+      const bA=Math.max(0,1-(performance.now()-b.t)/CFG.trailFadeMs);
+      const alpha=Math.max(0,Math.min(1,(aA+bA)/2));
+      ctx.strokeStyle=`rgba(239,68,68,${alpha})`;
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
     }
   }
 }
 
-/* ========= リンゴ描画 ========= */
+/* ========= リンゴ描画（赤系のみ） ========= */
 function drawApple(cx,cy,r,ang,isCut){
   ctx.save();
   ctx.translate(cx,cy);
-  ctx.rotate(ang*0.4); // ほんの少し回転（回りすぎない）
+  ctx.rotate(ang*0.4);
 
-  // 影
+  /* 影（床側の落ち影。リンゴ本体の色指定ではないので残します） */
   ctx.fillStyle = 'rgba(0,0,0,.06)';
   ctx.beginPath(); ctx.ellipse(4,6, r*0.9, r*0.4, 0, 0, Math.PI*2); ctx.fill();
 
-  // 本体（やや縦長の円）
+  /* 本体：赤＋濃赤の縁（グレー不使用） */
   ctx.beginPath();
   ctx.ellipse(0,0, r*0.95, r*1.05, 0, 0, Math.PI*2);
-  ctx.fillStyle   = isCut ? 'rgba(239,68,68,.55)' : 'var(--apple)';
-  ctx.strokeStyle = 'var(--appleEdge)';
+  ctx.fillStyle   = isCut ? 'rgba(239,68,68,.55)' : getComputedStyle(document.documentElement).getPropertyValue('--apple').trim();
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--appleEdge').trim();
   ctx.lineWidth   = Math.max(2, r*0.12);
   ctx.fill(); ctx.stroke();
 
-  // ハイライト
-  ctx.fillStyle = 'rgba(255,255,255,.28)';
+  /* ハイライト：白ではなく “明るい赤” に変更 */
+  ctx.fillStyle = 'rgba(255,138,138,.28)'; // ← 明るい赤（--appleLight相当）
   ctx.beginPath();
   ctx.ellipse(-r*0.35, -r*0.25, r*0.28, r*0.18, -0.5, 0, Math.PI*2);
   ctx.fill();
 
-  // ヘタ
-  ctx.strokeStyle = 'var(--stem)';
+  /* ヘタ＆葉 */
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--stem').trim();
   ctx.lineWidth = Math.max(2, r*0.12);
   ctx.beginPath();
   ctx.moveTo(0,-r*0.95); ctx.quadraticCurveTo(r*0.1,-r*1.35, r*0.22,-r*1.1);
   ctx.stroke();
 
-  // 葉
-  ctx.fillStyle = 'var(--leaf)';
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--leaf').trim();
   ctx.beginPath();
   ctx.ellipse(r*0.36, -r*1.05, r*0.35, r*0.2, 0.8, 0, Math.PI*2);
   ctx.fill();
