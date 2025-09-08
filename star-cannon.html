@@ -100,7 +100,7 @@ function toPlaying(){
   score=0; misses=0; elapsed=0; updateHUD();
   stars.length=particles.length=0;
   spawnTimer=0; nextSpawn=pickNextSpawn();
-  aiming=false; // 照準OFFから開始
+  aiming=false;
 }
 function toGameOver(){
   state='gameover';
@@ -133,19 +133,26 @@ const CFG = {
   starRMin: 10, starRMax: 16,
   rainbowChance: 0.07,
   rainbowBonus: 5,
+
   vyBaseMin: 80, vyBaseMax: 140,
   vyMaxBoost: 2.2,
   driftMax: 40,
+
   spawnMin: 380, spawnMax: 1000,
   spawnMinLimit: 240,
+
   maxMiss: 3,
   scorePerStar: 10,
+
   particleN: 16,
 
-  // 連続ビーム表示
-  beamDash:[10,8],     // 破線パターン [線, 空白]
+  // 破線ビーム
+  beamDash:[10,8],
   beamWidth:6,
-  beamGlow:1.8
+  beamGlow:1.8,
+
+  // 砲台照準を受け付ける半径（砲台中心からの距離）
+  aimRadius: 110
 };
 
 /* なめらか加速 */
@@ -166,21 +173,21 @@ let score=0, misses=0, elapsed=0;
 let stars=[], particles=[];
 let spawnTimer=0, nextSpawn=600;
 
-/* 照準（連続ビーム） */
+/* 連続ビーム：砲台近傍で方向だけ指定 */
 let aiming=false;
-let aimX=0, aimY=0;
-let dashOffset=0;
+let aimDX=0, aimDY=-1;   // 正規化された方向ベクトル（上向き初期値）
+let capturedPointer=null;
 
 /* ======= 初期化 ======= */
 function initGameObjects(){
   score=0; misses=0; elapsed=0;
   stars.length=particles.length=0;
   spawnTimer=0; nextSpawn=pickNextSpawn();
-  aiming=false;
+  aiming=false; aimDX=0; aimDY=-1; capturedPointer=null;
 }
 function onResize(){}
 
-/* ======= 便利関数 ======= */
+/* ======= 便利 ======= */
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function pickNextSpawn(){
@@ -198,22 +205,48 @@ function spawnStar(){
   stars.push({x, y:-r-10, r, vx, vy, type: isRainbow?'rainbow':'normal'});
 }
 
-/* ======= 入力（照準オン/オフ & 追従） ======= */
+/* ======= 入力：砲台周辺だけで方向を指定 ======= */
 function canvasPos(e){
   const rect = canvas.getBoundingClientRect();
   return {x:(e.clientX-rect.left), y:(e.clientY-rect.top)};
 }
+function cannonPos(){
+  return {x:viewW/2, y:viewH-24};
+}
+function updateAimFromPoint(px,py){
+  const {x:cx,y:cy}=cannonPos();
+  let dx = px - cx, dy = py - cy;
+  const len = Math.hypot(dx,dy) || 1;
+  dx/=len; dy/=len;
+  // 下方向（dy>0）も許容するが、僅かに上向きに補正して自爆しにくく
+  if(dy>0 && Math.abs(dy)>0.2){ dy *= 0.6; } 
+  const norm = Math.hypot(dx,dy)||1;
+  aimDX=dx/norm; aimDY=dy/norm;
+}
 canvas.addEventListener('pointerdown', e=>{
   if(state!=='playing') return;
   const p=canvasPos(e);
-  aimX=p.x; aimY=p.y; aiming=true;
+  const {x:cx,y:cy}=cannonPos();
+  const dist = Math.hypot(p.x-cx, p.y-cy);
+  if(dist <= CFG.aimRadius){
+    updateAimFromPoint(p.x,p.y);
+    aiming = true;
+    capturedPointer = e.pointerId;
+    canvas.setPointerCapture?.(capturedPointer);
+  }
 });
 canvas.addEventListener('pointermove', e=>{
   if(!aiming || state!=='playing') return;
   const p=canvasPos(e);
-  aimX=p.x; aimY=p.y;
+  updateAimFromPoint(p.x,p.y);
 });
-addEventListener('pointerup', ()=>{ aiming=false; });
+addEventListener('pointerup', e=>{
+  if(capturedPointer!==null){
+    try{ canvas.releasePointerCapture?.(capturedPointer); }catch(_){}
+    capturedPointer=null;
+  }
+  aiming=false;
+});
 
 /* ======= パーティクル ======= */
 function spawnStarParticles(s){
@@ -254,14 +287,17 @@ function update(dt){
     }
   }
 
-  // 連続ビーム命中判定（毎フレーム）
+  // 連続ビーム命中（砲台→方向ベクトルの“半無限線分”として判定）
   if(aiming){
-    const cx = viewW/2, cy = viewH-24;
+    const {x:cx,y:cy}=cannonPos();
+    const L = Math.hypot(viewW,viewH) * 1.6; // 画面対角より少し長い
+    const bx = cx + aimDX*L, by = cy + aimDY*L;
+
     for(let i=stars.length-1;i>=0;i--){
-      const s = stars[i];
-      if(segCircleHit(cx,cy, aimX,aimY, s.x,s.y, s.r)){
-        const bonus = (s.type==='rainbow') ? 5 : 1;
-        score += 10 * bonus;
+      const s=stars[i];
+      if(segCircleHit(cx,cy,bx,by, s.x,s.y, s.r)){
+        const bonus = (s.type==='rainbow') ? CFG.rainbowBonus : 1;
+        score += CFG.scorePerStar * bonus;
         updateHUD();
         spawnStarParticles(s);
         stars.splice(i,1);
@@ -278,11 +314,11 @@ function update(dt){
     if(p.life<=0) particles.splice(i,1);
   }
 
-  // 破線の流れアニメ
+  // 破線の流れ
   dashOffset = (dashOffset + 240*dt) % 1000;
 }
 
-/* ======= 判定 & ユーティリティ ======= */
+/* ======= 判定 ======= */
 function segCircleHit(ax,ay,bx,by,cx,cy,r){
   const abx=bx-ax, aby=by-ay;
   const t = clamp(((cx-ax)*abx + (cy-ay)*aby) / (abx*abx+aby*aby||1), 0, 1);
@@ -292,6 +328,7 @@ function segCircleHit(ax,ay,bx,by,cx,cy,r){
 }
 
 /* ======= 描画 ======= */
+let dashOffset=0;
 function render(){
   ctx.clearRect(0,0,viewW,viewH);
   drawBackdropStars();
@@ -302,9 +339,17 @@ function render(){
   // 砲台
   drawCannon();
 
-  // 連続ビーム（破線）
+  // 連続ビーム（破線）— 砲台近傍で照準している間のみ
   if(aiming){
-    drawDashedBeam(viewW/2, viewH-24, aimX, aimY);
+    const {x:cx,y:cy}=cannonPos();
+    const L = Math.hypot(viewW,viewH) * 1.6;
+    const bx = cx + aimDX*L, by = cy + aimDY*L;
+    drawDashedBeam(cx,cy,bx,by);
+
+    // 照準リング（砲台近辺にうっすら）
+    ctx.strokeStyle='rgba(255,255,255,.15)';
+    ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(cx,cy, CFG.aimRadius, 0, Math.PI*2); ctx.stroke();
   }
 
   // パーティクル
@@ -364,19 +409,19 @@ function drawStarShape(x,y,r, rainbow){
 }
 
 function drawDashedBeam(ax,ay,bx,by){
-  // 外側発光（太め・淡い）
+  // 外側発光
   const grad = ctx.createLinearGradient(ax,ay,bx,by);
   grad.addColorStop(0, 'rgba(147,197,253,.35)');
   grad.addColorStop(1, 'rgba(96,165,250,.08)');
   ctx.save();
   ctx.setLineDash(CFG.beamDash);
-  ctx.lineDashOffset = -dashOffset; // 流れて見える
+  ctx.lineDashOffset = -dashOffset;
   ctx.strokeStyle = grad;
   ctx.lineWidth = CFG.beamWidth * CFG.beamGlow;
   ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
   ctx.restore();
 
-  // コア（細め・明るい水色）
+  // コア
   ctx.save();
   ctx.setLineDash(CFG.beamDash);
   ctx.lineDashOffset = -dashOffset;
