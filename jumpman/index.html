@@ -3,12 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>サムライバナナ</title>
+<title>サムライアップル</title>
 <style>
   :root{
     --bg:#f7f8fc; --panel:#ffffff; --text:#111827; --muted:#4b5563;
-    --banana:#ffd400;      /* 明るい黄色 */
-    --bananaEdge:#b38600;  /* 縁の黄土色 */
+    /* 🍎 リンゴ色 */
+    --apple:#ef4444;      /* 本体の赤 */
+    --appleEdge:#7f1d1d;  /* 縁の濃い赤 */
+    --leaf:#16a34a;       /* 葉の緑 */
+    --stem:#6b4f1d;       /* ヘタの茶 */
     --slash:#ef4444;
     --border:#e5e7eb; --shadow:0 6px 18px rgba(0,0,0,.07);
   }
@@ -37,13 +40,14 @@
   }
   canvas{width:100%; height:100%; display:block}
 
-  /* START/RESTART：無装飾ボタンのみ（オーバーレイは透過で邪魔しない） */
+  /* START/RESTART：無装飾ボタンのみ */
   .overlay{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
   }
   .overlay .plain{
     pointer-events:auto; background:transparent; border:1px solid #111; color:#111;
-    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer; touch-action:manipulation;
+    padding:10px 18px; font-weight:800; border-radius:8px; cursor:pointer;
+    touch-action:manipulation;
   }
   .overlay.hidden{display:none}
 
@@ -56,7 +60,7 @@
 </head>
 <body>
   <header>
-    <h1>サムライバナナ</h1>
+    <h1>サムライアップル</h1>
     <div class="score">SCORE: <span id="score">0</span></div>
   </header>
 
@@ -73,10 +77,8 @@
   </main>
 
 <script>
-/* ====== ループは一度だけ起動／状態はここで集中管理 ====== */
-let state='idle';            // 'idle' | 'playing' | 'gameover'
-let starting=false;          // 多重開始防止
-let lastT=0;
+/* ========= 画面/状態 ========= */
+let state='idle', starting=false, lastT=0;
 
 const stage   = document.getElementById('stage');
 const canvas  = document.getElementById('game');
@@ -86,8 +88,9 @@ const missEl  = document.getElementById('miss');
 const overlay = document.getElementById('overlay');
 const startBtn= document.getElementById('btnStart');
 
-/* CSSピクセル座標（ロジック用）＋ DPRスケール（描画用） */
-let viewW=720, viewH=1080, dpr=1;
+/* ★ ゲーム座標は CSS ピクセルで統一（描画のみDPR対応） */
+let viewW = 720, viewH = 1080, dpr = 1;
+
 function fitCanvas(){
   const rect = stage.getBoundingClientRect();
   dpr = Math.min(window.devicePixelRatio||1, 2);
@@ -95,19 +98,19 @@ function fitCanvas(){
   canvas.height = Math.max(480, Math.floor(rect.height * dpr));
   canvas.style.width  = rect.width + 'px';
   canvas.style.height = rect.height + 'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0); // 描画だけ高DPI
-  viewW = rect.width; viewH = rect.height;
+  ctx.setTransform(dpr,0,0,dpr,0,0);   // 描画だけ高DPI
+  viewW = rect.width; viewH = rect.height; // ロジックはCSS px
   onResize();
 }
 addEventListener('resize', fitCanvas, {passive:true});
 
-/* ====== 安全な開始・再開始 ====== */
+/* ========= 状態遷移 ========= */
 function toPlaying(){
   state='playing';
   overlay.classList.add('hidden');
-  // ランタイムの再初期化
+  // ランタイム初期化
   score=0; misses=0; elapsed=0; updateHUD();
-  bananas.length=particles.length=recentSegments.length=slashTrail.length=0;
+  apples.length=particles.length=recentSegments.length=slashTrail.length=0;
   spawnTimer=0; nextSpawn=pickNextSpawn(); lastCutAt=0; combo=0;
 }
 function toGameOver(){
@@ -118,95 +121,120 @@ function toGameOver(){
 function fullReset(){
   state='idle'; starting=false; lastT=0;
   fitCanvas();
-  initGameObjects(); // 静的初期化
+  initGameObjects();
   startBtn.textContent='START';
   overlay.classList.remove('hidden');
   updateHUD();
 }
 function safeStart(){
-  if(starting || state==='playing') return;
-  starting = true;
-  fullReset();
-  toPlaying();
-  setTimeout(()=>{ starting=false; }, 120); // ダブルタップ吸収
+  if(starting||state==='playing') return;
+  starting=true; fullReset(); toPlaying();
+  setTimeout(()=>{ starting=false; }, 120); // 多重タップ吸収
 }
-/* Start/Restart ボタン：3系統 */
-function onStartBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
-startBtn.addEventListener('click', onStartBtn);
-startBtn.addEventListener('pointerdown', onStartBtn);
-startBtn.addEventListener('touchstart', onStartBtn, {passive:false});
+function onBtn(e){ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); }
+startBtn.addEventListener('click', onBtn);
+startBtn.addEventListener('pointerdown', onBtn);
+startBtn.addEventListener('touchstart', onBtn, {passive:false});
+canvas.addEventListener('pointerdown', e=>{ if(state!=='playing') onBtn(e); });
 
-/* キャンバスをタップしても開始できる（idle/gameover時のみ） */
-canvas.addEventListener('pointerdown', e=>{
-  if(state!=='playing'){ onStartBtn(e); }
-});
-
-/* ====== ゲーム設定（“細長い黄色のバナナ”＆じわじわ加速） ====== */
+/* ========= 設定 ========= */
 const CFG = {
-  sizeMin: 46, sizeMax: 64,          // バナナ太さ基準
-  gravityBase: 820, gravityPerScore: 1.2,
-  baseVyMin: 150, baseVyMax: 210,
-  vyPerScore: 0.6,
+  // サイズ（リンゴ半径の基準）
+  sizeMin: 28, sizeMax: 36,
+
+  // 物理（なめらか加速に最適化）
+  gravityBase: 820,                 // 初期重力
+  gravityMaxBoost: 0.8,             // 重力倍率の最大上昇量（+80%まで）
+  baseVyMin: 150, baseVyMax: 210,   // 初速の基準
+  vyMaxBoost: 0.5,                  // 初速倍率の最大上昇量（+50%まで）
+
   vxRand: 140,
-  spinMin: -2.2, spinMax: 2.2,
-  spawnMin: 460, spawnMax: 1180,
-  spawnPerScore: 2.0, spawnMinLimit: 260,
-  maxMiss: 3, scoreBase: 10, comboWindow: 600,
-  sliceWidth: 7, trailFadeMs: 220, segmentKeepMs: 120, particleN: 14,
-  bounceDampen: 0.6, sideMargin: 4
+  spinMin: -1.6, spinMax: 1.6,      // リンゴはあまり回転させない
+
+  // スポーン（間隔短縮もなだらか）
+  spawnMin: 520, spawnMax: 1200,
+  spawnMinLimit: 320,
+
+  // ゲーム制約
+  maxMiss: 3,
+  scoreBase: 10,
+  comboWindow: 600,
+  sliceWidth: 7,
+  trailFadeMs: 220,
+  segmentKeepMs: 120,
+  particleN: 14,
+
+  // 端で跳ね返り（画面外に出さない）
+  bounceDampen: 0.6,
+  sideMargin: 4
 };
 
-/* ====== 変数群 ====== */
+/* ★ “なめらか加速”関数：0→1に飽和する曲線（指数緩和） */
+function smooth01(x, k=40){ return 1 - Math.exp(-x / k); }
+/* 速度スケール（1.0〜1.0+maxBoost まで緩やかに増加） */
+function speedScale(score, maxBoost){
+  return 1 + maxBoost * smooth01(score, 40);         // スコア40付近で半分程度
+}
+/* スポーン短縮（徐々に短く・下限あり） */
+function spawnMillis(score){
+  const t = smooth01(score, 50);                      // 0→1へ緩やか
+  const min = Math.max(CFG.spawnMinLimit, CFG.spawnMin - 300*t);
+  const max = CFG.spawnMax - 300*t*0.7;
+  return {min, max: Math.max(min+60, max)};
+}
+
+/* ========= 変数 ========= */
 let score=0, misses=0, elapsed=0;
-let bananas=[], particles=[];
+let apples=[], particles=[];
 let slashTrail=[], recentSegments=[];
 let spawnTimer=0, nextSpawn=600;
 let lastCutAt=0, combo=0;
 
-/* ====== 初期化（静的） ====== */
+/* ========= 初期化 ========= */
 function initGameObjects(){
   score=0; misses=0; elapsed=0;
-  bananas.length=particles.length=slashTrail.length=recentSegments.length=0;
+  apples.length=particles.length=slashTrail.length=recentSegments.length=0;
   spawnTimer=0; nextSpawn=pickNextSpawn(); lastCutAt=0; combo=0;
 }
+function onResize(){}
 
-/* ====== スポーン & 物理 ====== */
+/* ========= 乱数・ユーティリティ ========= */
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-function safeSpawnX(halfW){
-  const margin = Math.max(CFG.sideMargin, halfW + 6);
+
+/* ========= スポーン ========= */
+function safeSpawnX(halfR){
+  const margin = Math.max(CFG.sideMargin, halfR + 8);
   return rand(margin, viewW - margin);
 }
 function pickNextSpawn(){
-  const dec = score * CFG.spawnPerScore;
-  const min = Math.max(CFG.spawnMinLimit, CFG.spawnMin - dec);
-  const max = Math.max(min+60, CFG.spawnMax - dec*0.7);
+  const {min, max} = spawnMillis(score);
   return min + Math.random()*(max - min);
 }
-function spawnBanana(){
-  const s   = rand(CFG.sizeMin, CFG.sizeMax);
-  const halfW = s*0.9;
-  const x   = safeSpawnX(halfW);
-  const vy  = rand(CFG.baseVyMin, CFG.baseVyMax) * (1 + score*0.006); // じわじわ
-  const vx  = (Math.random()*2-1) * CFG.vxRand;
+function spawnApple(){
+  const r = rand(CFG.sizeMin, CFG.sizeMax);
+  const x = safeSpawnX(r);
+  const vScale = speedScale(score, CFG.vyMaxBoost); // 初速の緩やかな倍率
+  const vy = rand(CFG.baseVyMin, CFG.baseVyMax) * vScale;
+  const vx = (Math.random()*2-1) * CFG.vxRand;
   const ang = rand(0,Math.PI*2);
   const spin= rand(CFG.spinMin, CFG.spinMax);
-  bananas.push({x, y:-s-16, s, vx, vy, ang, spin, cut:false});
+  apples.push({x, y:-r-14, r, vx, vy, ang, spin, cut:false});
 }
 
-/* ====== 入力：スワイプを線分に変換 ====== */
+/* ========= 入力（スワイプ→線分） ========= */
 let pointerDown=false, lastPt=null;
 function canvasPos(e){
-  const r=canvas.getBoundingClientRect();
-  return {x:(e.clientX-r.left), y:(e.clientY-r.top)}; // CSS px
+  const rect=canvas.getBoundingClientRect();
+  return {x:(e.clientX-rect.left), y:(e.clientY-rect.top)}; // CSS px
 }
-canvas.addEventListener('pointerdown', e=>{
-  if(state!=='playing'){ return; } // 上のhandlerで開始済み
+canvas.addEventListener('pointerdown',e=>{
+  if(state!=='playing'){ return; } // 上で開始処理済み
   pointerDown=true; lastPt=canvasPos(e);
   slashTrail.push({x:lastPt.x,y:lastPt.y,t:performance.now()});
 });
-canvas.addEventListener('pointermove', e=>{
-  if(!pointerDown || state!=='playing') return;
+canvas.addEventListener('pointermove',e=>{
+  if(!pointerDown||state!=='playing') return;
   const p=canvasPos(e), now=performance.now();
   slashTrail.push({x:p.x,y:p.y,t:now});
   if(lastPt){
@@ -215,7 +243,7 @@ canvas.addEventListener('pointermove', e=>{
   }
   lastPt=p;
 });
-addEventListener('pointerup', ()=>{ pointerDown=false; lastPt=null; });
+addEventListener('pointerup',()=>{ pointerDown=false; lastPt=null; });
 
 function segCircleHit(ax,ay,bx,by,cx,cy,r){
   const abx=bx-ax, aby=by-ay;
@@ -224,68 +252,68 @@ function segCircleHit(ax,ay,bx,by,cx,cy,r){
   return (dx*dx+dy*dy) <= r*r;
 }
 function slashCheck(ax,ay,bx,by, time){
-  for(const b of bananas){
-    if(b.cut) continue;
-    const r=b.s*1.0; // 細長いが当てやすさ重視で円近似
-    if(segCircleHit(ax,ay,bx,by,b.x,b.y,r)){
-      b.cut=true;
+  for(const a of apples){
+    if(a.cut) continue;
+    if(segCircleHit(ax,ay,bx,by,a.x,a.y,a.r*0.95)){ // 当てやすい少し甘め半径
+      a.cut=true;
       combo = (time-lastCutAt<=CFG.comboWindow) ? (combo+1) : 1;
       lastCutAt=time;
       score += CFG.scoreBase * combo;
       updateHUD();
-      spawnParticles(b.x,b.y,b.s);
+      spawnParticles(a.x,a.y,a.r);
     }
   }
 }
 
-/* ====== パーティクル ====== */
-function spawnParticles(x,y,s){
+/* ========= パーティクル ========= */
+function spawnParticles(x,y,r){
   for(let i=0;i<CFG.particleN;i++){
-    const a=Math.random()*Math.PI*2, sp=rand(120,320);
-    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:rand(260,460)});
+    const ang=Math.random()*Math.PI*2, sp=rand(120,320);
+    particles.push({x,y,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp,life:rand(260,460)});
   }
 }
 
-/* ====== 更新・描画 ====== */
+/* ========= 更新 ========= */
 function update(dt){
   elapsed += dt;
 
   // スポーン
   spawnTimer += dt*1000;
   if(spawnTimer>=nextSpawn){
-    spawnTimer=0; nextSpawn=pickNextSpawn(); spawnBanana();
+    spawnTimer=0; nextSpawn=pickNextSpawn(); spawnApple();
   }
 
-  // じわじわ加速（重力）
-  const gravity = CFG.gravityBase + CFG.gravityPerScore * score;
+  // ★ なめらか重力（倍率は 1 → 1+gravityMaxBoost に漸近）
+  const gScale = 1 + CFG.gravityMaxBoost * smooth01(score, 50);
+  const gravity = CFG.gravityBase * gScale;
 
-  // バナナ
-  for(let i=bananas.length-1;i>=0;i--){
-    const b=bananas[i];
-    b.vy += gravity*dt;
-    b.x  += b.vx*dt;
-    b.y  += b.vy*dt;
-    b.ang+= b.spin*dt;
+  // リンゴの移動
+  for(let i=apples.length-1;i>=0;i--){
+    const a=apples[i];
+    a.vy += gravity*dt;
+    a.x  += a.vx*dt;
+    a.y  += a.vy*dt;
+    a.ang+= a.spin*dt;
 
-    // 端バウンド（画面外に出ない）
-    const halfW = b.s*0.9;
-    if(b.x < halfW + CFG.sideMargin){
-      b.x = halfW + CFG.sideMargin; b.vx = Math.abs(b.vx)*CFG.bounceDampen;
-    }else if(b.x > viewW - (halfW + CFG.sideMargin)){
-      b.x = viewW - (halfW + CFG.sideMargin); b.vx = -Math.abs(b.vx)*CFG.bounceDampen;
+    // 端の跳ね返り（画面外に出さない）
+    const half = a.r;
+    if(a.x < half + CFG.sideMargin){
+      a.x = half + CFG.sideMargin; a.vx = Math.abs(a.vx) * CFG.bounceDampen;
+    }else if(a.x > viewW - (half + CFG.sideMargin)){
+      a.x = viewW - (half + CFG.sideMargin); a.vx = -Math.abs(a.vx) * CFG.bounceDampen;
     }
 
-    // 画面下に落下
-    if(b.y - b.s > viewH){
-      if(!b.cut){
+    // 画面下へ落下
+    if(a.y - a.r > viewH){
+      if(!a.cut){
         misses++; updateHUD();
         if(misses>=CFG.maxMiss){ toGameOver(); }
       }
-      bananas.splice(i,1);
+      apples.splice(i,1);
     }
   }
 
-  // 線分・軌跡の寿命
+  // 線分/軌跡の寿命
   const now=performance.now();
   while(recentSegments.length && now - recentSegments[0].t > CFG.segmentKeepMs) recentSegments.shift();
   while(slashTrail.length    && now - slashTrail[0].t    > CFG.trailFadeMs)    slashTrail.shift();
@@ -298,75 +326,93 @@ function update(dt){
     if(p.life<=0) particles.splice(i,1);
   }
 }
+
+/* ========= 描画 ========= */
 function render(){
   ctx.clearRect(0,0,viewW,viewH);
 
-  // バナナ（細長い三日月・黄色）
-  for(const b of bananas){ drawBananaCrescent(b.x,b.y,b.s,b.ang,b.cut); }
+  // 🍎 リンゴ
+  for(const a of apples){ drawApple(a.x,a.y,a.r,a.ang,a.cut); }
 
-  // パーティクル（黄色）
+  // パーティクル（赤〜オレンジ系）
   for(const p of particles){
-    const alpha=Math.max(0,Math.min(1,p.life/460));
-    ctx.fillStyle=`rgba(255,212,0,${alpha})`;
-    ctx.beginPath(); ctx.arc(p.x,p.y,2.4,0,Math.PI*2); ctx.fill();
+    const alpha = Math.max(0, Math.min(1, p.life/460));
+    ctx.fillStyle = `rgba(239,68,68,${alpha})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, Math.PI*2); ctx.fill();
   }
 
-  // 斬撃軌跡
+  // 斬撃
   if(slashTrail.length>1){
-    ctx.lineWidth=CFG.sliceWidth;
+    ctx.lineWidth = CFG.sliceWidth;
     for(let i=1;i<slashTrail.length;i++){
       const a=slashTrail[i-1], b=slashTrail[i];
-      const aA=Math.max(0,1-(performance.now()-a.t)/CFG.trailFadeMs);
-      const bA=Math.max(0,1-(performance.now()-b.t)/CFG.trailFadeMs);
-      const alpha=Math.max(0,Math.min(1,(aA+bA)/2));
-      ctx.strokeStyle=`rgba(239,68,68,${alpha})`;
+      const aAlpha = Math.max(0,1 - (performance.now()-a.t)/CFG.trailFadeMs);
+      const bAlpha = Math.max(0,1 - (performance.now()-b.t)/CFG.trailFadeMs);
+      const alpha = Math.max(0, Math.min(1,(aAlpha+bAlpha)/2));
+      ctx.strokeStyle = `rgba(239,68,68,${alpha})`;
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
     }
   }
 }
 
-/* 細長い三日月バナナ（ベジェ） */
-function drawBananaCrescent(cx,cy,s,ang,isCut){
-  const L=s*4.0, T=s*0.65, C=s*2.0;
-  ctx.save(); ctx.translate(cx,cy); ctx.rotate(ang);
+/* ========= リンゴ描画 ========= */
+function drawApple(cx,cy,r,ang,isCut){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(ang*0.4); // ほんの少し回転（回りすぎない）
 
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,.06)';
+  ctx.beginPath(); ctx.ellipse(4,6, r*0.9, r*0.4, 0, 0, Math.PI*2); ctx.fill();
+
+  // 本体（やや縦長の円）
   ctx.beginPath();
-  ctx.moveTo(-L*0.5, -T*0.36);
-  ctx.quadraticCurveTo(0,-C, L*0.5,-T*0.12);
-  ctx.lineTo(L*0.5 - s*0.20, T*0.12);
-  ctx.quadraticCurveTo(0, C, -L*0.5, T*0.36);
-  ctx.closePath();
-
-  ctx.fillStyle = isCut ? 'rgba(255,212,0,.55)' : 'var(--banana)';
-  ctx.strokeStyle='var(--bananaEdge)';
-  ctx.lineWidth=Math.max(2,s*0.12);
+  ctx.ellipse(0,0, r*0.95, r*1.05, 0, 0, Math.PI*2);
+  ctx.fillStyle   = isCut ? 'rgba(239,68,68,.55)' : 'var(--apple)';
+  ctx.strokeStyle = 'var(--appleEdge)';
+  ctx.lineWidth   = Math.max(2, r*0.12);
   ctx.fill(); ctx.stroke();
 
-  // へた
-  ctx.fillStyle='#167c3a';
-  ctx.beginPath(); ctx.ellipse(-L*0.52, -T*0.06, s*0.18, s*0.14, -0.2, 0, Math.PI*2); ctx.fill();
+  // ハイライト
+  ctx.fillStyle = 'rgba(255,255,255,.28)';
+  ctx.beginPath();
+  ctx.ellipse(-r*0.35, -r*0.25, r*0.28, r*0.18, -0.5, 0, Math.PI*2);
+  ctx.fill();
+
+  // ヘタ
+  ctx.strokeStyle = 'var(--stem)';
+  ctx.lineWidth = Math.max(2, r*0.12);
+  ctx.beginPath();
+  ctx.moveTo(0,-r*0.95); ctx.quadraticCurveTo(r*0.1,-r*1.35, r*0.22,-r*1.1);
+  ctx.stroke();
+
+  // 葉
+  ctx.fillStyle = 'var(--leaf)';
+  ctx.beginPath();
+  ctx.ellipse(r*0.36, -r*1.05, r*0.35, r*0.2, 0.8, 0, Math.PI*2);
+  ctx.fill();
 
   ctx.restore();
 }
 
-/* ====== HUD ====== */
+/* ========= HUD ========= */
 function updateHUD(){
-  scoreEl.textContent=String(score);
-  missEl.textContent=String(misses);
+  scoreEl.textContent = String(score);
+  missEl.textContent  = String(misses);
 }
 
-/* ====== ループ（一度だけ起動） ====== */
+/* ========= ループ ========= */
 function loop(t){
-  const dt=Math.min(32, t-lastT)/1000 || 0; lastT=t;
+  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
   if(state==='playing'){ update(dt); }
   render();
   requestAnimationFrame(loop);
 }
 
-/* ====== 起動 ====== */
+/* ========= 起動 ========= */
 function onResize(){}
-fullReset();           // 初期化（idle表示）
-requestAnimationFrame(loop); // ループは一度だけ
+fullReset();
+requestAnimationFrame(loop);
 </script>
 </body>
 </html>
