@@ -3,392 +3,191 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>雲をつくろう</title>
+<title>スライドパズル</title>
 <style>
   :root{
-    --bgTop:#b7d5ff;     /* 空：上 */
-    --bgBottom:#e9f4ff;  /* 空：下 */
-    --panel:#ffffffcc; --border:#d1d5db;
-    --text:#111827; --muted:#6b7280;
-
-    --cloudCore:#ffffff;           /* 雲中心 */
-    --cloudRim:#dbeafe;            /* 雲ふち(淡い青) */
-    --rain:#60a5fa;                /* 雨色 */
-    --splash:#93c5fd;
+    --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af; --border:rgba(255,255,255,.08);
+    --tile:#1f2937; --tile2:#111827; --accent:#22d3ee; --ok:#34d399; --warn:#f59e0b;
   }
   *{box-sizing:border-box}
-  html,body{
-    height:100%; margin:0;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
-    color:var(--text); background:linear-gradient(180deg,var(--bgTop),var(--bgBottom));
-    overflow:hidden; touch-action:none;
-  }
-  header{
-    height:44px; padding:8px 12px; display:flex; align-items:center; gap:10px;
-    justify-content:space-between; backdrop-filter:blur(6px);
-    background:var(--panel); border-bottom:1px solid var(--border);
-  }
-  h1{margin:0;font-size:16px;white-space:nowrap}
-  .hint{font-size:12px;color:var(--muted)}
-  .btn{appearance:none;border:1px solid var(--border);background:#fff;border-radius:10px;padding:6px 10px;cursor:pointer}
-  main{height:calc(100dvh - 44px);max-width:980px;margin:0 auto;padding:8px;display:flex;flex-direction:column}
-  .stage{position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.08)}
-  canvas{width:100%;height:100%;display:block}
-
-  /* START/RESTART — シンプルなオーバーレイ */
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
+  header{height:52px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:space-between;gap:12px}
+  h1{margin:0;font-size:16px}
+  .hud{display:flex;gap:8px;align-items:center}
+  .pill{font-variant-numeric:tabular-nums;background:#111827;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:13px}
+  .sel{appearance:none;background:#111827;color:var(--text);border:1px solid var(--border);border-radius:999px;padding:6px 10px}
+  .btn{appearance:none;border:1px solid var(--border);background:#1f2937;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer}
+  .btn:active{transform:translateY(1px)}
+  main{height:calc(100dvh - 52px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
+  .stage{position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#0b1023)}
+  .boardWrap{height:100%;display:grid;place-items:center;padding:12px}
+  .board{--n:4; width:min(94vmin, 520px); aspect-ratio:1/1; display:grid; grid-template-columns:repeat(var(--n),1fr); grid-template-rows:repeat(var(--n),1fr); gap:8px}
+  .tile{display:grid;place-items:center;border-radius:12px;background:var(--tile);border:1px solid rgba(255,255,255,.10);font-weight:800;font-size:clamp(18px,6vmin,28px);box-shadow:0 10px 20px rgba(0,0,0,.35)}
+  .tile.correct{outline:2px solid rgba(34,211,238,.35)}
+  .tile.empty{background:transparent;border:1px dashed rgba(255,255,255,.12);box-shadow:none}
   .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-  .overlay .plain{pointer-events:auto;background:#ffffffea;border:1px solid var(--border);color:var(--text);
-                  padding:12px 22px;border-radius:12px;font-weight:800;cursor:pointer}
+  .overlay .plain{pointer-events:auto;background:transparent;border:1px solid #fff;color:#fff;padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer;touch-action:manipulation}
   .overlay.hidden{display:none}
-
-  /* ボトムの地面（雨の着地点の目安） */
-  .ground{position:absolute;left:0;right:0;bottom:0;height:18px;background:linear-gradient(180deg,#cfe9ff,#b7d5ff)}
+  .msg{position:absolute;bottom:12px;left:12px;background:#111827cc;border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
   <header>
-    <div>
-      <h1>雲をつくろう</h1>
-      <div class="hint">指でなぞると雲が生まれ、風に乗って流れます。START/RESTARTで空をリセット。</div>
+    <h1>スライドパズル</h1>
+    <div class="hud">
+      <span class="pill">手数: <span id="moves">0</span></span>
+      <select id="sizeSel" class="sel" title="サイズ">
+        <option value="3">3 × 3</option>
+        <option value="4" selected>4 × 4</option>
+      </select>
+      <button id="btnShuffle" class="btn">シャッフル</button>
     </div>
-    <button id="btnReset" class="btn" type="button">RESTART</button>
   </header>
 
   <main>
     <section class="stage" id="stage">
-      <canvas id="game" width="720" height="1080" aria-label="空キャンバス"></canvas>
-      <div class="ground" aria-hidden="true"></div>
+      <div class="boardWrap">
+        <div id="board" class="board" aria-label="パズル盤面"></div>
+      </div>
 
       <div id="overlay" class="overlay" role="dialog" aria-modal="true">
         <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
       </div>
+
+      <div id="msg" class="msg">空白の隣のタイルをタップでスライド。START/RESTARTでやり直し。</div>
     </section>
   </main>
 
 <script>
-/* ========= 基本状態 ========= */
-let state='idle', starting=false, lastT=0;
+/* ===== 状態管理（テンプレ） ===== */
+let state='idle', starting=false;
+const boardEl=document.getElementById('board');
+const movesEl=document.getElementById('moves');
+const sizeSel=document.getElementById('sizeSel');
+const btnShuffle=document.getElementById('btnShuffle');
+const overlay=document.getElementById('overlay');
+const startBtn=document.getElementById('btnStart');
 
-const stage = document.getElementById('stage');
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const overlay = document.getElementById('overlay');
-const startBtn = document.getElementById('btnStart');
-const resetBtn = document.getElementById('btnReset');
+let N=4;                 // グリッドサイズ
+let tiles=[];            // 1..N*N-1, 0=空白
+let moves=0;
 
-let viewW=720, viewH=1080, dpr=1;
-
-function fitCanvas(){
-  const rect = stage.getBoundingClientRect();
-  dpr = Math.min(devicePixelRatio||1, 2);
-  canvas.width  = Math.max(360, Math.floor(rect.width  * dpr));
-  canvas.height = Math.max(480, Math.floor(rect.height * dpr));
-  canvas.style.width  = rect.width + 'px';
-  canvas.style.height = rect.height + 'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  viewW = rect.width; viewH = rect.height;
-}
-addEventListener('resize', fitCanvas, {passive:true});
-
-/* ========= START/RESTART テンプレ ========= */
 function toPlaying(){
-  state='playing';
   overlay.classList.add('hidden');
-  clouds.length=raindrops.length=splashes.length=trail.length=0;
-  windT=0; spawnCool=0;
-}
-function toIdle(){
-  state='idle';
-  overlay.classList.remove('hidden');
-  startBtn.textContent='START';
+  state='playing';
+  resetBoard(N);
 }
 function fullReset(){
-  starting=false; lastT=0;
-  fitCanvas();
-  toPlaying(); // リセット後すぐ描けるように開始状態へ
+  starting=false;
+  moves=0; movesEl.textContent='0';
+  resetBoard(N);
+  overlay.classList.remove('hidden'); // STARTを見せたい場合はコメント解除
 }
 function safeStart(){
   if(starting) return;
   starting=true;
-  fullReset();
-  setTimeout(()=>{ starting=false; },120);
+  toPlaying();
+  setTimeout(()=>{starting=false;},120);
 }
-const onBtn = (e)=>{ e?.preventDefault?.(); e?.stopPropagation?.(); safeStart(); };
-startBtn.addEventListener('click', onBtn);
-startBtn.addEventListener('pointerdown', onBtn);
-startBtn.addEventListener('touchstart', onBtn, {passive:false});
-resetBtn.addEventListener('click', onBtn);
-canvas.addEventListener('pointerdown', e=>{ if(state!=='playing') onBtn(e); });
-
-/* ========= パラメータ ========= */
-const CFG = {
-  // 雲の生成（描画軌跡ごと）
-  spawnEveryPx: 16,          // 指の移動距離この分ごとに雲粒生成
-  puffRMin: 12, puffRMax: 28,
-  puffJitter: 6,             // 指の線からのランダムばらつき
-
-  // 雲の流れ（風）
-  windBase: 18,              // 平均風速(px/s)
-  windVar:  26,              // 変動幅
-  windChangeSec: 8,          // 風向き/強さがゆっくり変わる周期
-
-  // 雲の統合
-  mergeK: 0.92,              // 当たり半径の係数（大きいほど合体しやすい）
-  maxClouds: 200,            // パフォーマンス抑制
-  fadeAt: 250,               // これ以上の個数なら古い小粒を少しずつフェード
-
-  // 雨
-  rainChanceOnMerge: 0.35,   // 合体時に雨が出る確率
-  rainPerMerge: [3,8],       // 1回の合体から落ちる粒の数
-  dripThreshold: 54,         // 雲がこの半径を超えると、たまに自発的に雫
-  dripInterval: [1.2, 3.2],  // 自発滴下の間隔(秒)
-  dropSpeed: [180, 320],     // 落下速度
-  splashN: [4,8],            // 着地スプラッシュ粒
-};
-
-/* ========= データ ========= */
-let clouds=[];     // {x,y,r,alpha,vx,vy,dripT,nextDrip}
-let raindrops=[];  // {x,y,vx,vy,life}
-let splashes=[];   // {x,y,vx,vy,life}
-let trail=[];      // 入力の補間用
-
-/* 風（時変ベクトル） */
-let windT=0;
-function windVec(dt){
-  windT += dt;
-  const t = windT / CFG.windChangeSec;
-  // ゆっくり変わる擬似ノイズ（サイン合成）
-  const ang = Math.sin(t*0.9)*0.7 + Math.sin(t*0.47+1.2)*0.6;
-  const spd = CFG.windBase + CFG.windVar*(0.5+0.5*Math.sin(t*0.6+2.1));
-  return { vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd*0.2 }; // 上下は控えめ
-}
-
-/* ========= 入力：なぞって雲を生成 ========= */
-let isDrawing=false, lastPt=null, accDist=0;
-function pos(e){
-  const rect=canvas.getBoundingClientRect();
-  return {x:e.clientX-rect.left, y:e.clientY-rect.top};
-}
-canvas.addEventListener('pointerdown', e=>{
-  if(state!=='playing') return;
-  isDrawing=true; lastPt=pos(e); accDist=0;
-  trail.push({x:lastPt.x,y:lastPt.y});
-  spawnPuffNear(lastPt.x,lastPt.y, true);
+const onBtn=e=>{e?.preventDefault?.(); e?.stopPropagation?.(); safeStart();};
+startBtn.addEventListener('click',onBtn);
+startBtn.addEventListener('pointerdown',onBtn);
+startBtn.addEventListener('touchstart',onBtn,{passive:false});
+btnShuffle.addEventListener('click',()=>{ if(state!=='playing') safeStart(); shuffleSolvable(); render(); moves=0; movesEl.textContent='0'; });
+sizeSel.addEventListener('change',()=>{
+  N=parseInt(sizeSel.value,10);
+  boardEl.style.setProperty('--n', N);
+  safeStart();
+  shuffleSolvable(); render(); moves=0; movesEl.textContent='0';
 });
-canvas.addEventListener('pointermove', e=>{
-  if(!isDrawing || state!=='playing') return;
-  const p=pos(e);
-  const dx=p.x-lastPt.x, dy=p.y-lastPt.y;
-  const d=Math.hypot(dx,dy);
-  if(d>0){
-    accDist+=d;
-    // 指の移動距離に合わせて粒を等間隔生成
-    while(accDist>=CFG.spawnEveryPx){
-      accDist-=CFG.spawnEveryPx;
-      const t=(CFG.spawnEveryPx-accDist)/d;
-      const x=lastPt.x+dx*t, y=lastPt.y+dy*t;
-      spawnPuffNear(x,y,false);
-      trail.push({x,y});
-    }
-    lastPt=p;
-  }
-});
-addEventListener('pointerup', ()=>{ isDrawing=false; lastPt=null; accDist=0; trail.length=0; });
 
-function spawnPuffNear(x,y,first){
-  const jitter=CFG.puffJitter;
-  const px=x+(Math.random()*2-1)*jitter;
-  const py=y+(Math.random()*2-1)*jitter;
-  const r = rand(CFG.puffRMin, CFG.puffRMax);
-  const {vx,vy} = windVec(0); // 今の風向に乗せる
-  clouds.push({x:px,y:py,r,alpha:0.0,vx,vy,dripT:0,nextDrip:rand(CFG.dripInterval[0], CFG.dripInterval[1])});
-  if(clouds.length>CFG.maxClouds) clouds.shift(); // 古いの削除
-}
-
-/* ========= 更新 ========= */
-function update(dt){
-  const w = windVec(dt);
-
-  // 雲を風で移動＆フェードイン
-  for(const c of clouds){
-    // 速度 = 風 + (わずかなゆらぎ)
-    c.vx = w.vx + Math.sin((c.x+c.y)*0.002 + windT*1.3)*6;
-    c.vy = w.vy + Math.cos((c.x-c.y)*0.003 + windT*1.1)*4;
-    c.x += c.vx*dt;
-    c.y += c.vy*dt*0.35; // 縦は弱め
-    c.alpha = Math.min(1, c.alpha + dt*1.2);
-
-    // 大きな雲は時々しずく
-    if(c.r >= CFG.dripThreshold){
-      c.dripT += dt;
-      if(c.dripT >= c.nextDrip){
-        c.dripT = 0;
-        c.nextDrip = rand(CFG.dripInterval[0], CFG.dripInterval[1]);
-        makeRaindrops(c.x + rand(-c.r*0.4, c.r*0.4), c.y + rand(-c.r*0.2, c.r*0.2), rand(2,4));
-      }
-    }
-  }
-
-  // 端から出た雲をゆるくラップ（空が続いて見える）
-  for(const c of clouds){
-    if(c.x < -80) c.x = viewW+60;
-    if(c.x > viewW+80) c.x = -60;
-    if(c.y < -120) c.y = -120; // 上には行きすぎない
-    if(c.y > viewH-40) c.y = viewH-40;
-  }
-
-  // 多すぎるとき少しずつ薄く（古い小粒優先）
-  if(clouds.length>CFG.fadeAt){
-    for(let i=0;i<clouds.length;i++){
-      const c=clouds[i];
-      if(c.r < (CFG.puffRMin+CFG.puffRMax)/2){
-        c.alpha = Math.max(0, c.alpha - dt*0.2);
-      }
-    }
-    clouds = clouds.filter(c=>c.alpha>0.02);
-  }
-
-  // 合体（面積保存）
-  mergeClouds();
-
-  // 雨の落下
-  for(let i=raindrops.length-1;i>=0;i--){
-    const d=raindrops[i];
-    d.vy += 500*dt; // ちょっと加速
-    d.x += d.vx*dt; d.y += d.vy*dt;
-    if(d.y >= viewH-18){ // 地面に着地
-      makeSplash(d.x, viewH-18, rand(...CFG.splashN));
-      raindrops.splice(i,1);
-    }
-  }
-  // スプラッシュ
-  for(let i=splashes.length-1;i>=0;i--){
-    const s=splashes[i];
-    s.vx *= 0.98; s.vy = (s.vy+400*dt)*0.98;
-    s.x += s.vx*dt; s.y += s.vy*dt;
-    s.life -= dt*1000;
-    if(s.life<=0) splashes.splice(i,1);
-  }
-}
-
-function mergeClouds(){
-  // 単純なO(n^2) 合体（nが大きすぎない想定）
-  for(let i=0;i<clouds.length;i++){
-    const a=clouds[i]; if(!a) continue;
-    for(let j=i+1;j<clouds.length;j++){
-      const b=clouds[j]; if(!b) continue;
-      const dx=b.x-a.x, dy=b.y-a.y;
-      const dist=Math.hypot(dx,dy);
-      const need = (a.r+b.r)*CFG.mergeK;
-      if(dist < need){
-        // 面積保存で半径更新
-        const area = Math.PI*a.r*a.r + Math.PI*b.r*b.r;
-        const rNew = Math.sqrt(area/Math.PI);
-        // 位置は重さ(面積)の重心
-        const wa=a.r*a.r, wb=b.r*b.r, wsum=wa+wb||1;
-        a.x = (a.x*wa + b.x*wb)/wsum;
-        a.y = (a.y*wa + b.y*wb)/wsum;
-        a.r = rNew;
-        a.alpha = Math.max(a.alpha, b.alpha);
-
-        // 速度は平均 + ほんの少し減衰
-        a.vx = (a.vx + b.vx)*0.5*0.98;
-        a.vy = (a.vy + b.vy)*0.5*0.98;
-
-        // たまに雨を降らす
-        if(Math.random()<CFG.rainChanceOnMerge){
-          const n = Math.floor(rand(CFG.rainPerMerge[0], CFG.rainPerMerge[1]));
-          makeRaindrops(a.x, a.y + rand(-a.r*0.2,a.r*0.2), n);
-        }
-
-        // bを削除
-        clouds.splice(j,1);
-        j--;
-      }
-    }
-  }
-}
-
-function makeRaindrops(x,y,n){
-  for(let k=0;k<n;k++){
-    raindrops.push({
-      x: x + rand(-6,6),
-      y: y + rand(-4,4),
-      vx: rand(-20,20),
-      vy: rand(...CFG.dropSpeed),
-      life: 2000
-    });
-  }
-}
-function makeSplash(x,y,n){
-  for(let i=0;i<n;i++){
-    const a=Math.random()*Math.PI, sp=rand(60,180);
-    splashes.push({x, y, vx:Math.cos(a)*sp, vy:-Math.sin(a)*sp*0.7, life: rand(220,420)});
-  }
-}
-
-/* ========= 描画 ========= */
-function render(){
-  // 背景はCSSで塗られているのでクリアのみ
-  ctx.clearRect(0,0,viewW,viewH);
-
-  // 雲（大きい順に描くと立体感が出る）
-  const order=[...clouds].sort((p,q)=>p.r-q.r);
-  for(const c of order) drawCloud(c);
-
-  // 雨
-  for(const d of raindrops) drawDrop(d);
-
-  // スプラッシュ
-  for(const s of splashes) drawSplash(s);
-}
-
-function drawCloud(c){
-  const r=c.r;
-  // ふわっとした円を2層で重ねる
-  // 外側
-  const g1 = ctx.createRadialGradient(c.x,c.y, r*0.2, c.x,c.y, r*1.1);
-  g1.addColorStop(0, `rgba(255,255,255,${0.7*c.alpha})`);
-  g1.addColorStop(1, `rgba(219,234,254,${0.0*c.alpha})`); // var(--cloudRim)
-  ctx.fillStyle=g1;
-  ctx.beginPath(); ctx.arc(c.x,c.y,r*1.05,0,Math.PI*2); ctx.fill();
-
-  // 内側（明るい核）
-  const g2 = ctx.createRadialGradient(c.x-r*0.1,c.y-r*0.12, 0, c.x,c.y, r*0.9);
-  g2.addColorStop(0, `rgba(255,255,255,${0.9*c.alpha})`);
-  g2.addColorStop(1, `rgba(255,255,255,${0.0})`);
-  ctx.fillStyle=g2;
-  ctx.beginPath(); ctx.arc(c.x,c.y,r,0,Math.PI*2); ctx.fill();
-}
-
-function drawDrop(d){
-  ctx.fillStyle='rgba(96,165,250,0.9)'; // var(--rain)
-  ctx.beginPath();
-  ctx.ellipse(d.x, d.y, 2.2, 5.6, 0, 0, Math.PI*2);
-  ctx.fill();
-}
-
-function drawSplash(s){
-  const a = Math.max(0, Math.min(1, s.life/420));
-  ctx.fillStyle = `rgba(147,197,253,${a})`; // var(--splash)
-  ctx.beginPath(); ctx.arc(s.x,s.y,2.2,0,Math.PI*2); ctx.fill();
-}
-
-/* ========= 便利 ========= */
-const rand=(a,b)=>a+Math.random()*(b-a);
-
-/* ========= ループ ========= */
-function loop(t){
-  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
-  if(state==='playing'){ update(dt); }
+/* ===== 盤面生成 ===== */
+function resetBoard(n){
+  tiles = [...Array(n*n-1).keys()].map(x=>x+1);
+  tiles.push(0); // 空白
+  boardEl.style.setProperty('--n', n);
   render();
-  requestAnimationFrame(loop);
+}
+function render(){
+  boardEl.innerHTML='';
+  tiles.forEach((v,idx)=>{
+    const d=document.createElement('div');
+    const row=Math.floor(idx/N), col=idx%N;
+    d.style.gridRowStart=row+1;
+    d.style.gridColumnStart=col+1;
+    if(v===0){
+      d.className='tile empty';
+      d.setAttribute('aria-label','空白');
+    }else{
+      d.className='tile';
+      d.textContent=v;
+      // 正解位置なら薄くハイライト
+      const targetIdx=v-1;
+      if(targetIdx===idx) d.classList.add('correct');
+      d.addEventListener('click',()=>tryMove(idx));
+      d.addEventListener('pointerdown',()=>tryMove(idx));
+    }
+    boardEl.appendChild(d);
+  });
 }
 
-/* ========= 起動 ========= */
-fitCanvas();
-overlay.classList.remove('hidden'); // 初期はSTART表示
-requestAnimationFrame(loop);
+/* ===== 操作 ===== */
+function tryMove(idx){
+  const emptyIdx = tiles.indexOf(0);
+  const r=Math.floor(idx/N), c=idx%N;
+  const er=Math.floor(emptyIdx/N), ec=emptyIdx%N;
+  // 隣接のみ移動可
+  const isAdj = (r===er && Math.abs(c-ec)===1) || (c===ec && Math.abs(r-er)===1);
+  if(!isAdj) return;
+  swap(idx, emptyIdx);
+  moves++; movesEl.textContent=String(moves);
+  render();
+  if(isSolved()){
+    celebrate();
+  }
+}
+function swap(a,b){ const t=tiles[a]; tiles[a]=tiles[b]; tiles[b]=t; }
+
+/* ===== シャッフル（必ず解ける並び） ===== */
+function shuffleSolvable(){
+  // 完成形から「合法手」をランダムに何手か打つ方式（解けることが保証）
+  const steps = 200 + Math.floor(Math.random()*200);
+  for(let i=0;i<steps;i++){
+    const empty = tiles.indexOf(0);
+    const r=Math.floor(empty/N), c=empty%N;
+    const cand=[];
+    if(r>0) cand.push(empty-N);
+    if(r<N-1) cand.push(empty+N);
+    if(c>0) cand.push(empty-1);
+    if(c<N-1) cand.push(empty+1);
+    // 直前と同じ戻し手をしにくくするため末尾優先シャッフル
+    const pick = cand[Math.floor(Math.random()*cand.length)];
+    swap(empty, pick);
+  }
+}
+
+/* ===== クリア判定 ===== */
+function isSolved(){
+  for(let i=0;i<tiles.length-1;i++){
+    if(tiles[i]!==i+1) return false;
+  }
+  return tiles[tiles.length-1]===0;
+}
+function celebrate(){
+  // すべてのタイルを緑っぽく
+  [...boardEl.children].forEach(ch=>{
+    if(ch.classList.contains('tile') && !ch.classList.contains('empty')){
+      ch.style.background='linear-gradient(180deg,#065f46,#064e3b)';
+      ch.style.borderColor='rgba(16,185,129,.5)';
+    }
+  });
+}
+
+/* ===== 初期化 ===== */
+(function init(){
+  resetBoard(N);
+  overlay.classList.remove('hidden'); // 初回はSTART表示
+})();
 </script>
 </body>
 </html>
