@@ -3,296 +3,325 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>リンゴキャッチゲーム</title>
+<title>スライドパズル</title>
 <style>
   :root{
-    --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af; --gold:#fbbf24;
+    --bg:#fefefe; --panel:#ffffff; --text:#374151; --muted:#6b7280; --border:#e5e7eb;
+    --tile-colors: #fde68a,#fca5a5,#a5b4fc,#6ee7b7,#f9a8d4,#93c5fd,#fdba74,#c4b5fd,#fcd34d,#fda4af,#86efac,#67e8f9,#fbbf24,#f87171,#60a5fa;
   }
   *{box-sizing:border-box}
-  html,body{
-    height:100%;margin:0;background:var(--bg);color:var(--text);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
-    overflow:hidden
-  }
-  header{
-    padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);background:var(--panel);
-    display:flex;align-items:center;justify-content:space-between;gap:12px
-  }
-  h1{margin:0;font-size:18px;white-space:nowrap}
-  .score{
-    font-weight:800;background:#111827;border:1px solid rgba(255,255,255,.12);
-    padding:6px 10px;border-radius:999px;font-variant-numeric:tabular-nums
-  }
-  main{height:calc(100dvh - 48px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
-  .stage{
-    position:relative;flex:1;border:1px solid rgba(255,255,255,.06);
-    border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#0b1023)
-  }
-  canvas{width:100%;height:100%;display:block;touch-action:none}
-  .overlay{
-    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    background:rgba(0,0,0,.28);text-align:center;gap:12px;flex-direction:column
-  }
-  .sheet{
-    background:#0b1220;border:1px solid rgba(255,255,255,.16);padding:18px;border-radius:14px;
-    max-width:90vw;box-shadow:0 20px 50px rgba(0,0,0,.55)
-  }
-  .btn{
-    appearance:none;border:1px solid rgba(255,255,255,.2);background:#1f2937;color:var(--text);
-    padding:12px 20px;border-radius:12px;cursor:pointer;font-weight:700;touch-action:manipulation
-  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
+  header{height:52px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:space-between;gap:12px}
+  h1{margin:0;font-size:16px}
+  .hud{display:flex;gap:8px;align-items:center}
+  .pill{font-variant-numeric:tabular-nums;background:#f3f4f6;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:13px}
+  .sel{appearance:none;background:#f3f4f6;color:var(--text);border:1px solid var(--border);border-radius:999px;padding:6px 10px}
+  .btn{appearance:none;border:1px solid var(--border);background:#f3f4f6;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer}
   .btn:active{transform:translateY(1px)}
-  .hidden{display:none}
+  main{height:calc(100dvh - 52px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
+  .stage{position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#fefefe,#f9fafb)}
+  .boardWrap{height:100%;display:grid;place-items:center;padding:8px}
+  .board{--n:4; width:min(90vmin,95vw,520px); aspect-ratio:1/1; display:grid; grid-template-columns:repeat(var(--n),1fr); grid-template-rows:repeat(var(--n),1fr); gap:6px}
+  .tile{display:grid;place-items:center;border-radius:12px;font-weight:800;font-size:clamp(18px,6vmin,28px);color:#374151;box-shadow:0 4px 8px rgba(0,0,0,.15); transition:filter .2s}
+  .tile.correct{outline:2px solid rgba(255,255,255,.5)}
+  .tile.empty{background:transparent;border:2px dashed #d1d5db;box-shadow:none}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .overlay .plain{pointer-events:auto;background:#fff;border:1px solid #ccc;color:var(--text);padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer;touch-action:manipulation}
+  .overlay.hidden{display:none}
+  .msg{position:absolute;bottom:12px;left:12px;background:#ffffffcc;border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:12px;color:var(--muted)}
+
+  /* === 祝福演出 === */
+  .flashLayer{
+    position:absolute; inset:0; pointer-events:none; mix-blend-mode:screen; opacity:0;
+    background: radial-gradient(120% 80% at 50% 50%, rgba(255,255,255,.85), transparent 60%);
+    animation: flashStrobe .12s linear infinite;
+  }
+  .flashActive{ opacity:.85; }
+  @keyframes flashStrobe{
+    0%{ filter:brightness(1) saturate(1.2); }
+    50%{ filter:brightness(2.2) saturate(1.6); }
+    100%{ filter:brightness(1) saturate(1.2); }
+  }
+
+  .glowAll .tile:not(.empty){
+    /* 虹色グロー（軽め） */
+    box-shadow:
+      0 0 0 2px rgba(255,255,255,.7),
+      0 0 16px rgba(255,99,132,.35),
+      0 0 24px rgba(54,162,235,.25),
+      0 0 36px rgba(255,206,86,.2);
+    filter: saturate(1.2) brightness(1.05);
+  }
+
+  /* 紙吹雪キャンバス */
+  #confetti{ position:absolute; inset:0; pointer-events:none; }
 </style>
 </head>
 <body>
   <header>
-    <h1>リンゴキャッチゲーム</h1>
-    <div class="score">SCORE: <span id="score">0</span></div>
+    <h1>スライドパズル</h1>
+    <div class="hud">
+      <span class="pill">手数: <span id="moves">0</span></span>
+      <select id="sizeSel" class="sel" title="サイズ">
+        <option value="3">3 × 3</option>
+        <option value="4" selected>4 × 4</option>
+      </select>
+      <button id="btnShuffle" class="btn">シャッフル</button>
+    </div>
   </header>
 
   <main>
-    <div class="stage" id="stage">
-      <canvas id="game" width="720" height="1080" aria-label="ゲーム画面"></canvas>
-      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
-        <div class="sheet">
-          <div id="title" style="font-weight:800;font-size:22px;margin-bottom:8px">START</div>
-          <div id="sub" style="color:var(--muted);font-size:12px">
-            カゴを左右に動かして上から落ちるリンゴをキャッチ！<br>
-            金のリンゴは高得点。特大リンゴは超ボーナス。<br>
-            1つでも取り逃すとゲームオーバー。
-          </div>
-        </div>
-        <button id="btnStart" class="btn" type="button" aria-label="開始">START</button>
+    <section class="stage" id="stage">
+      <div class="boardWrap">
+        <div id="board" class="board" aria-label="パズル盤面"></div>
       </div>
-    </div>
+
+      <!-- 祝福演出レイヤ -->
+      <canvas id="confetti" width="10" height="10" aria-hidden="true"></canvas>
+      <div id="flash" class="flashLayer" aria-hidden="true"></div>
+
+      <div id="overlay" class="overlay" role="dialog" aria-modal="true">
+        <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
+      </div>
+
+      <div id="msg" class="msg">空白の隣のタイルをタップでスライド。START/RESTARTでやり直し。</div>
+    </section>
   </main>
 
 <script>
-/* ========= 設定 ========= */
-const CFG = {
-  basketW: 140, basketH: 36, basketSpeed: 900,
-  appleR: 19, baseFall: 260, levelFallAdd: 70,
-  spawnEveryMs: 450, levelUpEvery: 10,
-  goldenChance: 0.15,
-  scoreNormal: 1, scoreGolden: 5, scoreSpecial: 10,   // 特大リンゴ
-  specialRate: 0.01, specialScale: 2.5                // 100個に1個・直径2.5倍
-};
+let state='idle', starting=false;
+const stageEl=document.getElementById('stage');
+const boardEl=document.getElementById('board');
+const movesEl=document.getElementById('moves');
+const sizeSel=document.getElementById('sizeSel');
+const btnShuffle=document.getElementById('btnShuffle');
+const overlay=document.getElementById('overlay');
+const startBtn=document.getElementById('btnStart');
+const flashEl=document.getElementById('flash');
+const confettiCanvas=document.getElementById('confetti');
+const cctx=confettiCanvas.getContext('2d');
 
-/* ========= 要素 ========= */
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const $ = s=>document.querySelector(s);
-const stage = $('#stage');
-const overlay = $('#overlay'), titleEl = $('#title'), subEl = $('#sub'), startBtn = $('#btnStart');
-const scoreEl = $('#score');
+let N=4;
+let tiles=[];
+let moves=0;
 
-/* ========= レイアウト ========= */
-function fitCanvas(){
-  const rect = stage.getBoundingClientRect();
-  canvas.width  = Math.max(320, Math.floor(rect.width));
-  canvas.height = Math.max(420, Math.floor(rect.height));
-  if (basket) {
-    const bottom = Math.max(60, canvas.height * 0.08);
-    basket.y = canvas.height - bottom;
-  }
-}
-addEventListener('resize', fitCanvas, {passive:true});
+const pastelColors = getComputedStyle(document.documentElement).getPropertyValue('--tile-colors').split(',');
 
-/* ========= 状態機械 ========= */
-let state = 'idle';
-let lastT = 0;
-let score = 0, caught = 0, level = 0;
-let basket;
-let apples = [];     // {x,y,r,vy,golden,special}
-let spawnTimer = 0, nextSpawn = 0;
-let keyL=false, keyR=false;
-
-/* ========= 初期化 ========= */
-function fullReset(){
-  state = 'idle';
-  lastT = 0;
-  score = 0; caught = 0; level = 0;
-  apples.length = 0;
-  spawnTimer = 0; nextSpawn = 0;
-  keyL = keyR = false;
-
-  fitCanvas();
-  const bottom = Math.max(60, canvas.height * 0.08);
-  basket = { x: canvas.width/2, y: canvas.height - bottom, w: CFG.basketW, h: CFG.basketH };
-
-  nextSpawn = pickNextSpawn();
-  scoreEl.textContent = '0';
-  startBtn.textContent = 'START';
-  titleEl.textContent = 'START';
-  subEl.innerHTML = 'カゴを左右に動かして上から落ちるリンゴをキャッチ！<br>金のリンゴは高得点。特大リンゴは超ボーナス。<br>1つでも取り逃すとゲームオーバー。';
-  overlay.classList.remove('hidden');
-}
-
-/* ========= スポーン（1個ずつ・テンポ良く） ========= */
-function pickNextSpawn(){
-  const base = Math.max(180, CFG.spawnEveryMs - level*40);
-  return base * (0.85 + Math.random() * 0.40);
-}
-function spawnOneApple(){
-  let r = CFG.appleR, special = false;
-  if (Math.random() < CFG.specialRate) { r = Math.round(CFG.appleR * CFG.specialScale); special = true; }
-  const margin = r + 8;
-  const x = Math.random() * (canvas.width - margin*2) + margin;
-  const golden = !special && Math.random() < CFG.goldenChance; // 特大はゴールド化しない
-  const vy = (CFG.baseFall + level * CFG.levelFallAdd) * (golden ? 0.95 : 1);
-  apples.push({ x, y: -r, r, vy, golden, special });
-}
-
-/* ========= HUD ========= */
-function updateHUD(){ scoreEl.textContent = String(score); }
-
-/* ========= 入力 ========= */
-addEventListener('keydown', e=>{
-  if(e.key==='ArrowLeft')  keyL = true;
-  if(e.key==='ArrowRight') keyR = true;
-  if((e.key==='Enter' || e.key===' ') && state !== 'playing'){ safeStart(); }
-});
-addEventListener('keyup', e=>{
-  if(e.key==='ArrowLeft')  keyL = false;
-  if(e.key==='ArrowRight') keyR = false;
-});
-function handlePointer(clientX){
-  const rect = canvas.getBoundingClientRect();
-  const x = (clientX - rect.left) * (canvas.width / rect.width);
-  basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, x));
-}
-canvas.addEventListener('pointerdown', e=>handlePointer(e.clientX));
-canvas.addEventListener('pointermove', e=>{ if(e.buttons) handlePointer(e.clientX); });
-
-/* ========= 当たり判定・描画 ========= */
-function circleRectHit(cx, cy, cr, rx, ry, rw, rh){
-  const nx = Math.max(rx, Math.min(cx, rx+rw));
-  const ny = Math.max(ry, Math.min(cy, ry+rh));
-  const dx = cx - nx, dy = cy - ny;
-  return dx*dx + dy*dy <= cr*cr;
-}
-function drawBasket(){
-  const {x,y,w,h} = basket;
-  const main = '#cfa97a', shade = '#b78e5c';
-
-  // （薄い半円ハイライトは削除）
-
-  // 本体
-  ctx.fillStyle = main;
-  ctx.fillRect(x-w/2, y-h/2, w, h);
-  // 上の縁
-  ctx.fillStyle = shade;
-  ctx.fillRect(x-w/2, y-h/2, w, 3);
-
-  // メッシュ
-  ctx.save();
-  ctx.strokeStyle = 'rgba(90,60,30,0.38)';
-  ctx.lineWidth = 1;
-  const left = x-w/2, top = y-h/2, right = x+w/2, bottom = y+h/2;
-  for(let d=-w; d<=w; d+=10){
-    ctx.beginPath(); ctx.moveTo(left + d, top); ctx.lineTo(left + d + h, bottom); ctx.stroke();
-  }
-  for(let d=-w; d<=w; d+=10){
-    ctx.beginPath(); ctx.moveTo(right - d, top); ctx.lineTo(right - d - h, bottom); ctx.stroke();
-  }
-  ctx.restore();
-}
-function drawApple(a){
-  ctx.fillStyle = a.golden ? 'var(--gold)' : '#ff3b3b';
-  ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = '#14532d'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(a.x, a.y - a.r + 4); ctx.lineTo(a.x, a.y - a.r - 6); ctx.stroke();
-  if(a.golden){
-    ctx.strokeStyle = 'rgba(255,255,255,.85)';
-    ctx.beginPath(); ctx.moveTo(a.x-6, a.y-3); ctx.lineTo(a.x-1, a.y-8);
-    ctx.moveTo(a.x+4, a.y+2); ctx.lineTo(a.x+8, a.y-2); ctx.stroke();
-  }
-  if(a.special){
-    ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(a.x, a.y, a.r+2, 0, Math.PI*2); ctx.stroke();
-  }
-}
-
-/* ========= ループ ========= */
-function loop(t){
-  const dt = Math.min(32, t - lastT) / 1000 || 0;
-  lastT = t;
-
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  if(state === 'playing'){
-    const dx = (keyR - keyL) * CFG.basketSpeed * dt;
-    basket.x = Math.max(basket.w/2, Math.min(canvas.width - basket.w/2, basket.x + dx));
-
-    spawnTimer += dt*1000;
-    if(spawnTimer >= nextSpawn){
-      spawnTimer = 0;
-      spawnOneApple();
-      nextSpawn = pickNextSpawn();
-    }
-
-    for(let i=apples.length-1;i>=0;i--){
-      const a = apples[i];
-      a.y += a.vy * dt;
-
-      if(circleRectHit(a.x,a.y,a.r, basket.x-basket.w/2, basket.y-basket.h/2-6, basket.w, basket.h+14)){
-        score += a.special ? CFG.scoreSpecial : (a.golden ? CFG.scoreGolden : CFG.scoreNormal);
-        caught++; apples.splice(i,1); updateHUD();
-        if(caught>0 && caught % CFG.levelUpEvery===0) level++;
-        continue;
-      }
-
-      if(a.y - a.r > canvas.height){
-        toGameOver();
-        drawBasket(); apples.forEach(drawApple);
-        requestAnimationFrame(loop);
-        return;
-      }
-    }
-  }
-
-  apples.forEach(drawApple);
-  drawBasket();
-  requestAnimationFrame(loop);
-}
-
-/* ========= 状態遷移 ========= */
+/* ===== スタート/リセット ===== */
 function toPlaying(){
-  state = 'playing';
   overlay.classList.add('hidden');
-  keyL = keyR = false;
+  state='playing';
+  stopCelebration(); // 念のため停止
+  resetBoard(N);
 }
-function toGameOver(){
-  state = 'gameover';
+function fullReset(){
+  starting=false;
+  moves=0; movesEl.textContent='0';
+  stopCelebration();
+  resetBoard(N);
   overlay.classList.remove('hidden');
-  titleEl.textContent = 'GAME OVER!';
-  subEl.innerHTML = `SCORE: ${score} — RESTART で再挑戦`;
-  startBtn.textContent = 'RESTART';
 }
-
-/* ========= 開始処理（デバウンス） ========= */
-let starting = false;
 function safeStart(){
-  if(starting || state === 'playing') return;
-  starting = true;
-  fullReset();     // 毎回完全初期化
-  toPlaying();     // プレイ開始
-  setTimeout(()=>{ starting = false; }, 120);
+  if(starting) return;
+  starting=true;
+  toPlaying();
+  setTimeout(()=>{starting=false;},120);
 }
+const onBtn=e=>{e?.preventDefault?.(); e?.stopPropagation?.(); safeStart();};
+startBtn.addEventListener('click',onBtn);
+btnShuffle.addEventListener('click',()=>{
+  if(state!=='playing') safeStart();
+  shuffleSolvable(); render(); moves=0; movesEl.textContent='0';
+});
 
-/* ========= ボタンのみで開始 ========= */
-function onBtn(e){
-  e?.preventDefault?.(); e?.stopPropagation?.();
+/* サイズ変更 */
+sizeSel.addEventListener('change',()=>{
+  N=parseInt(sizeSel.value,10);
+  boardEl.style.setProperty('--n', N);
   safeStart();
-}
-startBtn.addEventListener('click', onBtn);
-startBtn.addEventListener('pointerdown', onBtn);
-startBtn.addEventListener('touchstart', onBtn, {passive:false});
+  shuffleSolvable(); render(); moves=0; movesEl.textContent='0';
+});
 
-/* 初期起動 */
-fullReset();
-requestAnimationFrame(loop);
+/* ===== 盤面 ===== */
+function resetBoard(n){
+  tiles = [...Array(n*n-1).keys()].map(x=>x+1);
+  tiles.push(0);
+  boardEl.style.setProperty('--n', n);
+  render();
+}
+function render(){
+  boardEl.innerHTML='';
+  tiles.forEach((v,idx)=>{
+    const d=document.createElement('div');
+    if(v===0){
+      d.className='tile empty';
+    }else{
+      d.className='tile';
+      d.textContent=v;
+      d.style.background = pastelColors[(v-1)%pastelColors.length];
+      const targetIdx=v-1;
+      if(targetIdx===idx) d.classList.add('correct');
+      d.addEventListener('click',()=>tryMove(idx), {passive:true});
+    }
+    boardEl.appendChild(d);
+  });
+}
+
+function tryMove(idx){
+  if(state!=='playing') return;
+  const emptyIdx = tiles.indexOf(0);
+  const r=Math.floor(idx/N), c=idx%N;
+  const er=Math.floor(emptyIdx/N), ec=emptyIdx%N;
+  const isAdj=(r===er && Math.abs(c-ec)===1)||(c===ec && Math.abs(r-er)===1);
+  if(!isAdj) return;
+  swap(idx,emptyIdx);
+  moves++; movesEl.textContent=String(moves);
+  render();
+  if(isSolved()){
+    celebrate();
+  }
+}
+function swap(a,b){ [tiles[a],tiles[b]]=[tiles[b],tiles[a]]; }
+
+function shuffleSolvable(){
+  const steps = 200 + Math.floor(Math.random()*200);
+  for(let i=0;i<steps;i++){
+    const empty = tiles.indexOf(0);
+    const r=Math.floor(empty/N), c=empty%N;
+    const cand=[];
+    if(r>0) cand.push(empty-N);
+    if(r<N-1) cand.push(empty+N);
+    if(c>0) cand.push(empty-1);
+    if(c<N-1) cand.push(empty+1);
+    const pick = cand[Math.floor(Math.random()*cand.length)];
+    swap(empty,pick);
+  }
+}
+
+function isSolved(){
+  for(let i=0;i<tiles.length-1;i++){
+    if(tiles[i]!==i+1) return false;
+  }
+  return tiles[tiles.length-1]===0;
+}
+
+/* ===== 祝福演出（点滅＋紙吹雪） ===== */
+let confettiParticles=[];
+let confettiTimer=null;
+let confettiRunning=false;
+
+function celebrate(){
+  // タイルにグロー
+  stageEl.classList.add('glowAll');
+  // 点滅
+  flashEl.classList.add('flashActive');
+  // 紙吹雪開始
+  startConfetti(3000); // 3秒
+}
+
+function stopCelebration(){
+  stageEl.classList.remove('glowAll');
+  flashEl.classList.remove('flashActive');
+  confettiParticles.length=0;
+  confettiRunning=false;
+  if(confettiTimer){ clearTimeout(confettiTimer); confettiTimer=null; }
+  resizeConfetti(); // クリア
+  cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+}
+
+/* === 紙吹雪ロジック === */
+function resizeConfetti(){
+  const rect = stageEl.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  confettiCanvas.width = Math.floor(rect.width * dpr);
+  confettiCanvas.height= Math.floor(rect.height* dpr);
+  confettiCanvas.style.width = rect.width+'px';
+  confettiCanvas.style.height= rect.height+'px';
+  cctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize', resizeConfetti, {passive:true});
+resizeConfetti();
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+function spawnConfettiBurst(n=120){
+  const rect = stageEl.getBoundingClientRect();
+  for(let i=0;i<n;i++){
+    confettiParticles.push({
+      x: rand(0, rect.width),
+      y: rand(-20, 20),
+      vx: rand(-120,120),
+      vy: rand(80,220),
+      rot: rand(0,Math.PI*2),
+      vr: rand(-6,6),
+      w: rand(6,12),
+      h: rand(10,20),
+      life: rand(1200, 2200),
+      col: pickConfettiColor()
+    });
+  }
+}
+
+function pickConfettiColor(){
+  const cs = ['#f472b6','#60a5fa','#34d399','#fbbf24','#a78bfa','#f87171'];
+  return cs[Math.floor(Math.random()*cs.length)];
+}
+
+function startConfetti(ms=3000){
+  if(confettiRunning) return;
+  confettiRunning=true;
+  resizeConfetti();
+  confettiParticles.length=0;
+  // 初回ドン
+  spawnConfettiBurst(140);
+  // 追加で小さめを数回
+  const bursts = Math.max(1, Math.floor(ms/600)-1);
+  for(let i=1;i<=bursts;i++){
+    setTimeout(()=> confettiRunning && spawnConfettiBurst(80), i*450);
+  }
+  // 停止予約
+  confettiTimer = setTimeout(()=>{ confettiRunning=false; stopCelebration(); }, ms);
+  requestAnimationFrame(confettiLoop);
+}
+
+let lastT=0;
+function confettiLoop(t){
+  if(!confettiRunning) return;
+  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
+
+  // 物理更新
+  for(let i=confettiParticles.length-1;i>=0;i--){
+    const p = confettiParticles[i];
+    p.vy += 500*dt;     // 重力
+    p.vx *= 0.995;      // 空気抵抗
+    p.x  += p.vx*dt;
+    p.y  += p.vy*dt;
+    p.rot+= p.vr*dt;
+    p.life -= dt*1000;
+    if(p.y > confettiCanvas.height || p.life<=0){
+      confettiParticles.splice(i,1);
+    }
+  }
+
+  // 描画
+  cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+  for(const p of confettiParticles){
+    cctx.save();
+    cctx.translate(p.x, p.y);
+    cctx.rotate(p.rot);
+    cctx.fillStyle = p.col;
+    cctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+    cctx.restore();
+  }
+
+  requestAnimationFrame(confettiLoop);
+}
+
+/* ===== 初期化 ===== */
+(function init(){
+  resetBoard(N);
+  overlay.classList.remove('hidden'); // 初回はSTART表示
+})();
 </script>
 </body>
 </html>
