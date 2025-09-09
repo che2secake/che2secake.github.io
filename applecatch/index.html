@@ -26,22 +26,33 @@
   /* スマホでも必ず収まる：vmin と vw の両方で制御 */
   .board{--n:4;width:min(90vmin,95vw,520px);aspect-ratio:1/1;display:grid;
          grid-template-columns:repeat(var(--n),1fr);grid-template-rows:repeat(var(--n),1fr);gap:6px}
-  .tile{display:grid;place-items:center;border-radius:12px;font-weight:800;
-        font-size:clamp(18px,6vmin,28px);color:#374151;box-shadow:0 4px 8px rgba(0,0,0,.15);transition:filter .2s,transform .2s}
+
+  .tile{
+    display:grid;place-items:center;border-radius:12px;font-weight:800;
+    font-size:clamp(18px,6vmin,28px);color:#374151;
+    box-shadow:0 4px 8px rgba(0,0,0,.15);
+    transition:filter .2s,transform .2s;
+    background: var(--tileColor,#f3f4f6); /* ← 各タイルの色をCSS変数で受け取る */
+  }
   .tile.empty{background:transparent;border:2px dashed #d1d5db;box-shadow:none}
 
-  /* ★ 正しい位置にあるタイルの見た目（太枠＆軽いグロー） */
+  /* ★ 正しい位置にあるタイル（細めの黒枠＋立体感） */
   .tile.fixed{
-    outline:3px solid rgba(55,65,81,.85);
+    outline:1.5px solid rgba(0,0,0,.9);             /* 太枠を“半分”に */
+    /* 上が明るく下が少し暗い → 立体感 */
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.85), rgba(0,0,0,0.08)),
+      var(--tileColor,#f3f4f6);
     box-shadow:
-      0 0 0 2px rgba(255,255,255,.75),
-      0 6px 12px rgba(0,0,0,.18);
+      inset 0 2px 3px rgba(255,255,255,0.85),  /* 上のハイライト */
+      inset 0 -2px 3px rgba(0,0,0,0.25),       /* 下のシャドウ */
+      0 4px 10px rgba(0,0,0,.18);              /* 外側影で持ち上がり */
   }
   /* ★ ハマった瞬間だけ「ポン」演出 */
   .tile.justFixed{animation:popFixed .35s ease-out}
   @keyframes popFixed{
-    0%{transform:scale(.94);filter:brightness(1.15)}
-    60%{transform:scale(1.06);filter:brightness(1.25)}
+    0%{transform:scale(.94);filter:brightness(1.12)}
+    60%{transform:scale(1.06);filter:brightness(1.23)}
     100%{transform:scale(1.00);filter:brightness(1.00)}
   }
 
@@ -52,7 +63,7 @@
   .msg{position:absolute;bottom:12px;left:12px;background:#ffffffcc;border:1px solid var(--border);
        border-radius:10px;padding:6px 10px;font-size:12px;color:var(--muted)}
 
-  /* === 祝福演出（点滅） === */
+  /* === 祝福演出（点滅＋紙吹雪） === */
   .flashLayer{position:absolute;inset:0;pointer-events:none;mix-blend-mode:screen;opacity:0;
     background:radial-gradient(120% 80% at 50% 50%,rgba(255,255,255,.85),transparent 60%);
     animation:flashStrobe .12s linear infinite}
@@ -62,7 +73,6 @@
     50%{filter:brightness(2.2) saturate(1.6)}
     100%{filter:brightness(1) saturate(1.2)}
   }
-  /* タイル全体を少し光らせる */
   .glowAll .tile:not(.empty){
     box-shadow:
       0 0 0 2px rgba(255,255,255,.7),
@@ -71,7 +81,6 @@
       0 0 36px rgba(255,206,86,.2);
     filter:saturate(1.2) brightness(1.05);
   }
-  /* 紙吹雪レイヤ */
   #confetti{position:absolute;inset:0;pointer-events:none}
 </style>
 </head>
@@ -120,8 +129,8 @@ const flashEl=document.getElementById('flash');
 const confettiCanvas=document.getElementById('confetti');
 const cctx=confettiCanvas.getContext('2d');
 
-let N=4;           // 3 or 4
-let tiles=[];      // 1..N*N-1, 0=空白
+let N=4;                 // 3 or 4
+let tiles=[];            // 1..N*N-1, 0=空白
 let moves=0;
 let lastFixed = new Set(); // 前回レンダで固定だったタイル番号
 const pastelColors=getComputedStyle(document.documentElement).getPropertyValue('--tile-colors').split(',');
@@ -181,14 +190,17 @@ function render(){
     }else{
       d.className='tile';
       d.textContent=v;
-      d.style.background=pastelColors[(v-1)%pastelColors.length];
+
+      // 各タイルのベース色をCSS変数で渡す
+      const baseColor = pastelColors[(v-1)%pastelColors.length];
+      d.style.setProperty('--tileColor', baseColor);
 
       // 正しい位置（= 番号-1 と同じ idx）
       const isFixed = (v-1===idx);
       if(isFixed){
-        d.classList.add('fixed');
+        d.classList.add('fixed');  // 細枠＋立体感
         nowFixed.add(v);
-        if(!lastFixed.has(v)){           // 新たにハマった瞬間だけ演出
+        if(!lastFixed.has(v)){     // 新たにハマった瞬間だけ演出
           d.classList.add('justFixed');
           setTimeout(()=>d.classList.remove('justFixed'), 400);
         }
@@ -244,9 +256,9 @@ function isSolved(){
 let confettiParticles=[], confettiTimer=null, confettiRunning=false;
 
 function celebrate(){
-  stageEl.classList.add('glowAll');   // タイルがふわっと光る
-  flashEl.classList.add('flashActive'); // 盤面ストロボ
-  startConfetti(3000);                // 紙吹雪 3秒
+  stageEl.classList.add('glowAll');      // タイルがふわっと光る
+  flashEl.classList.add('flashActive');  // 盤面ストロボ
+  startConfetti(3000);                   // 紙吹雪 3秒
 }
 function stopCelebration(){
   stageEl.classList.remove('glowAll');
