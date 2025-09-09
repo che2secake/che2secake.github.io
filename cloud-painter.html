@@ -6,29 +6,29 @@
 <title>スライドパズル</title>
 <style>
   :root{
-    --bg:#0b1023; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af; --border:rgba(255,255,255,.08);
-    --tile:#1f2937; --tile2:#111827; --accent:#22d3ee; --ok:#34d399; --warn:#f59e0b;
+    --bg:#fefefe; --panel:#ffffff; --text:#374151; --muted:#6b7280; --border:#e5e7eb;
+    --tile-colors: #fde68a,#fca5a5,#a5b4fc,#6ee7b7,#f9a8d4,#93c5fd,#fdba74,#c4b5fd,#fcd34d,#fda4af,#86efac,#67e8f9,#fbbf24,#f87171,#60a5fa;
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden}
   header{height:52px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:space-between;gap:12px}
   h1{margin:0;font-size:16px}
   .hud{display:flex;gap:8px;align-items:center}
-  .pill{font-variant-numeric:tabular-nums;background:#111827;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:13px}
-  .sel{appearance:none;background:#111827;color:var(--text);border:1px solid var(--border);border-radius:999px;padding:6px 10px}
-  .btn{appearance:none;border:1px solid var(--border);background:#1f2937;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer}
+  .pill{font-variant-numeric:tabular-nums;background:#f3f4f6;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:13px}
+  .sel{appearance:none;background:#f3f4f6;color:var(--text);border:1px solid var(--border);border-radius:999px;padding:6px 10px}
+  .btn{appearance:none;border:1px solid var(--border);background:#f3f4f6;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer}
   .btn:active{transform:translateY(1px)}
   main{height:calc(100dvh - 52px);max-width:980px;margin:0 auto;padding:12px;display:flex;flex-direction:column}
-  .stage{position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#0b1023)}
-  .boardWrap{height:100%;display:grid;place-items:center;padding:12px}
-  .board{--n:4; width:min(94vmin, 520px); aspect-ratio:1/1; display:grid; grid-template-columns:repeat(var(--n),1fr); grid-template-rows:repeat(var(--n),1fr); gap:8px}
-  .tile{display:grid;place-items:center;border-radius:12px;background:var(--tile);border:1px solid rgba(255,255,255,.10);font-weight:800;font-size:clamp(18px,6vmin,28px);box-shadow:0 10px 20px rgba(0,0,0,.35)}
-  .tile.correct{outline:2px solid rgba(34,211,238,.35)}
-  .tile.empty{background:transparent;border:1px dashed rgba(255,255,255,.12);box-shadow:none}
+  .stage{position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#fefefe,#f9fafb)}
+  .boardWrap{height:100%;display:grid;place-items:center;padding:8px}
+  .board{--n:4; width:min(90vmin,95vw,520px); aspect-ratio:1/1; display:grid; grid-template-columns:repeat(var(--n),1fr); grid-template-rows:repeat(var(--n),1fr); gap:6px}
+  .tile{display:grid;place-items:center;border-radius:12px;font-weight:800;font-size:clamp(18px,6vmin,28px);color:#374151;box-shadow:0 4px 8px rgba(0,0,0,.15)}
+  .tile.correct{outline:2px solid rgba(255,255,255,.5)}
+  .tile.empty{background:transparent;border:2px dashed #d1d5db;box-shadow:none}
   .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-  .overlay .plain{pointer-events:auto;background:transparent;border:1px solid #fff;color:#fff;padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer;touch-action:manipulation}
+  .overlay .plain{pointer-events:auto;background:#fff;border:1px solid #ccc;color:var(--text);padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer;touch-action:manipulation}
   .overlay.hidden{display:none}
-  .msg{position:absolute;bottom:12px;left:12px;background:#111827cc;border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:12px;color:var(--muted)}
+  .msg{position:absolute;bottom:12px;left:12px;background:#ffffffcc;border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -59,7 +59,6 @@
   </main>
 
 <script>
-/* ===== 状態管理（テンプレ） ===== */
 let state='idle', starting=false;
 const boardEl=document.getElementById('board');
 const movesEl=document.getElementById('moves');
@@ -68,9 +67,11 @@ const btnShuffle=document.getElementById('btnShuffle');
 const overlay=document.getElementById('overlay');
 const startBtn=document.getElementById('btnStart');
 
-let N=4;                 // グリッドサイズ
-let tiles=[];            // 1..N*N-1, 0=空白
+let N=4;
+let tiles=[];
 let moves=0;
+
+const pastelColors = getComputedStyle(document.documentElement).getPropertyValue('--tile-colors').split(',');
 
 function toPlaying(){
   overlay.classList.add('hidden');
@@ -81,7 +82,7 @@ function fullReset(){
   starting=false;
   moves=0; movesEl.textContent='0';
   resetBoard(N);
-  overlay.classList.remove('hidden'); // STARTを見せたい場合はコメント解除
+  overlay.classList.remove('hidden');
 }
 function safeStart(){
   if(starting) return;
@@ -91,8 +92,6 @@ function safeStart(){
 }
 const onBtn=e=>{e?.preventDefault?.(); e?.stopPropagation?.(); safeStart();};
 startBtn.addEventListener('click',onBtn);
-startBtn.addEventListener('pointerdown',onBtn);
-startBtn.addEventListener('touchstart',onBtn,{passive:false});
 btnShuffle.addEventListener('click',()=>{ if(state!=='playing') safeStart(); shuffleSolvable(); render(); moves=0; movesEl.textContent='0'; });
 sizeSel.addEventListener('change',()=>{
   N=parseInt(sizeSel.value,10);
@@ -101,10 +100,9 @@ sizeSel.addEventListener('change',()=>{
   shuffleSolvable(); render(); moves=0; movesEl.textContent='0';
 });
 
-/* ===== 盤面生成 ===== */
 function resetBoard(n){
   tiles = [...Array(n*n-1).keys()].map(x=>x+1);
-  tiles.push(0); // 空白
+  tiles.push(0);
   boardEl.style.setProperty('--n', n);
   render();
 }
@@ -112,45 +110,33 @@ function render(){
   boardEl.innerHTML='';
   tiles.forEach((v,idx)=>{
     const d=document.createElement('div');
-    const row=Math.floor(idx/N), col=idx%N;
-    d.style.gridRowStart=row+1;
-    d.style.gridColumnStart=col+1;
     if(v===0){
       d.className='tile empty';
-      d.setAttribute('aria-label','空白');
     }else{
       d.className='tile';
       d.textContent=v;
-      // 正解位置なら薄くハイライト
+      d.style.background = pastelColors[(v-1)%pastelColors.length];
       const targetIdx=v-1;
       if(targetIdx===idx) d.classList.add('correct');
       d.addEventListener('click',()=>tryMove(idx));
-      d.addEventListener('pointerdown',()=>tryMove(idx));
     }
     boardEl.appendChild(d);
   });
 }
 
-/* ===== 操作 ===== */
 function tryMove(idx){
   const emptyIdx = tiles.indexOf(0);
   const r=Math.floor(idx/N), c=idx%N;
   const er=Math.floor(emptyIdx/N), ec=emptyIdx%N;
-  // 隣接のみ移動可
-  const isAdj = (r===er && Math.abs(c-ec)===1) || (c===ec && Math.abs(r-er)===1);
+  const isAdj=(r===er && Math.abs(c-ec)===1)||(c===ec && Math.abs(r-er)===1);
   if(!isAdj) return;
-  swap(idx, emptyIdx);
+  swap(idx,emptyIdx);
   moves++; movesEl.textContent=String(moves);
   render();
-  if(isSolved()){
-    celebrate();
-  }
 }
-function swap(a,b){ const t=tiles[a]; tiles[a]=tiles[b]; tiles[b]=t; }
+function swap(a,b){ [tiles[a],tiles[b]]=[tiles[b],tiles[a]]; }
 
-/* ===== シャッフル（必ず解ける並び） ===== */
 function shuffleSolvable(){
-  // 完成形から「合法手」をランダムに何手か打つ方式（解けることが保証）
   const steps = 200 + Math.floor(Math.random()*200);
   for(let i=0;i<steps;i++){
     const empty = tiles.indexOf(0);
@@ -160,33 +146,14 @@ function shuffleSolvable(){
     if(r<N-1) cand.push(empty+N);
     if(c>0) cand.push(empty-1);
     if(c<N-1) cand.push(empty+1);
-    // 直前と同じ戻し手をしにくくするため末尾優先シャッフル
     const pick = cand[Math.floor(Math.random()*cand.length)];
-    swap(empty, pick);
+    swap(empty,pick);
   }
 }
 
-/* ===== クリア判定 ===== */
-function isSolved(){
-  for(let i=0;i<tiles.length-1;i++){
-    if(tiles[i]!==i+1) return false;
-  }
-  return tiles[tiles.length-1]===0;
-}
-function celebrate(){
-  // すべてのタイルを緑っぽく
-  [...boardEl.children].forEach(ch=>{
-    if(ch.classList.contains('tile') && !ch.classList.contains('empty')){
-      ch.style.background='linear-gradient(180deg,#065f46,#064e3b)';
-      ch.style.borderColor='rgba(16,185,129,.5)';
-    }
-  });
-}
-
-/* ===== 初期化 ===== */
 (function init(){
   resetBoard(N);
-  overlay.classList.remove('hidden'); // 初回はSTART表示
+  overlay.classList.remove('hidden');
 })();
 </script>
 </body>
