@@ -22,13 +22,39 @@
   .stage{position:relative;flex:1;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#fefefe,#f9fafb)}
   .boardWrap{height:100%;display:grid;place-items:center;padding:8px}
   .board{--n:4; width:min(90vmin,95vw,520px); aspect-ratio:1/1; display:grid; grid-template-columns:repeat(var(--n),1fr); grid-template-rows:repeat(var(--n),1fr); gap:6px}
-  .tile{display:grid;place-items:center;border-radius:12px;font-weight:800;font-size:clamp(18px,6vmin,28px);color:#374151;box-shadow:0 4px 8px rgba(0,0,0,.15)}
+  .tile{display:grid;place-items:center;border-radius:12px;font-weight:800;font-size:clamp(18px,6vmin,28px);color:#374151;box-shadow:0 4px 8px rgba(0,0,0,.15); transition:filter .2s}
   .tile.correct{outline:2px solid rgba(255,255,255,.5)}
   .tile.empty{background:transparent;border:2px dashed #d1d5db;box-shadow:none}
   .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
   .overlay .plain{pointer-events:auto;background:#fff;border:1px solid #ccc;color:var(--text);padding:10px 18px;font-weight:800;border-radius:8px;cursor:pointer;touch-action:manipulation}
   .overlay.hidden{display:none}
   .msg{position:absolute;bottom:12px;left:12px;background:#ffffffcc;border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:12px;color:var(--muted)}
+
+  /* === 祝福演出 === */
+  .flashLayer{
+    position:absolute; inset:0; pointer-events:none; mix-blend-mode:screen; opacity:0;
+    background: radial-gradient(120% 80% at 50% 50%, rgba(255,255,255,.85), transparent 60%);
+    animation: flashStrobe .12s linear infinite;
+  }
+  .flashActive{ opacity:.85; }
+  @keyframes flashStrobe{
+    0%{ filter:brightness(1) saturate(1.2); }
+    50%{ filter:brightness(2.2) saturate(1.6); }
+    100%{ filter:brightness(1) saturate(1.2); }
+  }
+
+  .glowAll .tile:not(.empty){
+    /* 虹色グロー（軽め） */
+    box-shadow:
+      0 0 0 2px rgba(255,255,255,.7),
+      0 0 16px rgba(255,99,132,.35),
+      0 0 24px rgba(54,162,235,.25),
+      0 0 36px rgba(255,206,86,.2);
+    filter: saturate(1.2) brightness(1.05);
+  }
+
+  /* 紙吹雪キャンバス */
+  #confetti{ position:absolute; inset:0; pointer-events:none; }
 </style>
 </head>
 <body>
@@ -50,6 +76,10 @@
         <div id="board" class="board" aria-label="パズル盤面"></div>
       </div>
 
+      <!-- 祝福演出レイヤ -->
+      <canvas id="confetti" width="10" height="10" aria-hidden="true"></canvas>
+      <div id="flash" class="flashLayer" aria-hidden="true"></div>
+
       <div id="overlay" class="overlay" role="dialog" aria-modal="true">
         <button id="btnStart" class="plain" type="button" aria-label="開始">START</button>
       </div>
@@ -60,12 +90,16 @@
 
 <script>
 let state='idle', starting=false;
+const stageEl=document.getElementById('stage');
 const boardEl=document.getElementById('board');
 const movesEl=document.getElementById('moves');
 const sizeSel=document.getElementById('sizeSel');
 const btnShuffle=document.getElementById('btnShuffle');
 const overlay=document.getElementById('overlay');
 const startBtn=document.getElementById('btnStart');
+const flashEl=document.getElementById('flash');
+const confettiCanvas=document.getElementById('confetti');
+const cctx=confettiCanvas.getContext('2d');
 
 let N=4;
 let tiles=[];
@@ -73,14 +107,17 @@ let moves=0;
 
 const pastelColors = getComputedStyle(document.documentElement).getPropertyValue('--tile-colors').split(',');
 
+/* ===== スタート/リセット ===== */
 function toPlaying(){
   overlay.classList.add('hidden');
   state='playing';
+  stopCelebration(); // 念のため停止
   resetBoard(N);
 }
 function fullReset(){
   starting=false;
   moves=0; movesEl.textContent='0';
+  stopCelebration();
   resetBoard(N);
   overlay.classList.remove('hidden');
 }
@@ -92,7 +129,12 @@ function safeStart(){
 }
 const onBtn=e=>{e?.preventDefault?.(); e?.stopPropagation?.(); safeStart();};
 startBtn.addEventListener('click',onBtn);
-btnShuffle.addEventListener('click',()=>{ if(state!=='playing') safeStart(); shuffleSolvable(); render(); moves=0; movesEl.textContent='0'; });
+btnShuffle.addEventListener('click',()=>{
+  if(state!=='playing') safeStart();
+  shuffleSolvable(); render(); moves=0; movesEl.textContent='0';
+});
+
+/* サイズ変更 */
 sizeSel.addEventListener('change',()=>{
   N=parseInt(sizeSel.value,10);
   boardEl.style.setProperty('--n', N);
@@ -100,6 +142,7 @@ sizeSel.addEventListener('change',()=>{
   shuffleSolvable(); render(); moves=0; movesEl.textContent='0';
 });
 
+/* ===== 盤面 ===== */
 function resetBoard(n){
   tiles = [...Array(n*n-1).keys()].map(x=>x+1);
   tiles.push(0);
@@ -118,13 +161,14 @@ function render(){
       d.style.background = pastelColors[(v-1)%pastelColors.length];
       const targetIdx=v-1;
       if(targetIdx===idx) d.classList.add('correct');
-      d.addEventListener('click',()=>tryMove(idx));
+      d.addEventListener('click',()=>tryMove(idx), {passive:true});
     }
     boardEl.appendChild(d);
   });
 }
 
 function tryMove(idx){
+  if(state!=='playing') return;
   const emptyIdx = tiles.indexOf(0);
   const r=Math.floor(idx/N), c=idx%N;
   const er=Math.floor(emptyIdx/N), ec=emptyIdx%N;
@@ -133,6 +177,9 @@ function tryMove(idx){
   swap(idx,emptyIdx);
   moves++; movesEl.textContent=String(moves);
   render();
+  if(isSolved()){
+    celebrate();
+  }
 }
 function swap(a,b){ [tiles[a],tiles[b]]=[tiles[b],tiles[a]]; }
 
@@ -151,9 +198,129 @@ function shuffleSolvable(){
   }
 }
 
+function isSolved(){
+  for(let i=0;i<tiles.length-1;i++){
+    if(tiles[i]!==i+1) return false;
+  }
+  return tiles[tiles.length-1]===0;
+}
+
+/* ===== 祝福演出（点滅＋紙吹雪） ===== */
+let confettiParticles=[];
+let confettiTimer=null;
+let confettiRunning=false;
+
+function celebrate(){
+  // タイルにグロー
+  stageEl.classList.add('glowAll');
+  // 点滅
+  flashEl.classList.add('flashActive');
+  // 紙吹雪開始
+  startConfetti(3000); // 3秒
+}
+
+function stopCelebration(){
+  stageEl.classList.remove('glowAll');
+  flashEl.classList.remove('flashActive');
+  confettiParticles.length=0;
+  confettiRunning=false;
+  if(confettiTimer){ clearTimeout(confettiTimer); confettiTimer=null; }
+  resizeConfetti(); // クリア
+  cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+}
+
+/* === 紙吹雪ロジック === */
+function resizeConfetti(){
+  const rect = stageEl.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  confettiCanvas.width = Math.floor(rect.width * dpr);
+  confettiCanvas.height= Math.floor(rect.height* dpr);
+  confettiCanvas.style.width = rect.width+'px';
+  confettiCanvas.style.height= rect.height+'px';
+  cctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize', resizeConfetti, {passive:true});
+resizeConfetti();
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+function spawnConfettiBurst(n=120){
+  const rect = stageEl.getBoundingClientRect();
+  for(let i=0;i<n;i++){
+    confettiParticles.push({
+      x: rand(0, rect.width),
+      y: rand(-20, 20),
+      vx: rand(-120,120),
+      vy: rand(80,220),
+      rot: rand(0,Math.PI*2),
+      vr: rand(-6,6),
+      w: rand(6,12),
+      h: rand(10,20),
+      life: rand(1200, 2200),
+      col: pickConfettiColor()
+    });
+  }
+}
+
+function pickConfettiColor(){
+  const cs = ['#f472b6','#60a5fa','#34d399','#fbbf24','#a78bfa','#f87171'];
+  return cs[Math.floor(Math.random()*cs.length)];
+}
+
+function startConfetti(ms=3000){
+  if(confettiRunning) return;
+  confettiRunning=true;
+  resizeConfetti();
+  confettiParticles.length=0;
+  // 初回ドン
+  spawnConfettiBurst(140);
+  // 追加で小さめを数回
+  const bursts = Math.max(1, Math.floor(ms/600)-1);
+  for(let i=1;i<=bursts;i++){
+    setTimeout(()=> confettiRunning && spawnConfettiBurst(80), i*450);
+  }
+  // 停止予約
+  confettiTimer = setTimeout(()=>{ confettiRunning=false; stopCelebration(); }, ms);
+  requestAnimationFrame(confettiLoop);
+}
+
+let lastT=0;
+function confettiLoop(t){
+  if(!confettiRunning) return;
+  const dt = Math.min(32, t - lastT)/1000 || 0; lastT=t;
+
+  // 物理更新
+  for(let i=confettiParticles.length-1;i>=0;i--){
+    const p = confettiParticles[i];
+    p.vy += 500*dt;     // 重力
+    p.vx *= 0.995;      // 空気抵抗
+    p.x  += p.vx*dt;
+    p.y  += p.vy*dt;
+    p.rot+= p.vr*dt;
+    p.life -= dt*1000;
+    if(p.y > confettiCanvas.height || p.life<=0){
+      confettiParticles.splice(i,1);
+    }
+  }
+
+  // 描画
+  cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+  for(const p of confettiParticles){
+    cctx.save();
+    cctx.translate(p.x, p.y);
+    cctx.rotate(p.rot);
+    cctx.fillStyle = p.col;
+    cctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+    cctx.restore();
+  }
+
+  requestAnimationFrame(confettiLoop);
+}
+
+/* ===== 初期化 ===== */
 (function init(){
   resetBoard(N);
-  overlay.classList.remove('hidden');
+  overlay.classList.remove('hidden'); // 初回はSTART表示
 })();
 </script>
 </body>
